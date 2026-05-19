@@ -2804,7 +2804,7 @@ class StatsPage extends StatefulWidget {
 
 class _StatsPageState extends State<StatsPage> {
   RecordType selectedType = RecordType.expense;
-  StatsRange range = StatsRange.month;
+  StatsRange range = StatsRange.day;
   DateTime selectedDate = DateTime.now();
 
   @override
