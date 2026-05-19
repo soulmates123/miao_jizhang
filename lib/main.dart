@@ -6,10 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'reminder_service.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  runApp(const MiaoJiZhangApp());
+  final reminderService = ReminderService();
+  await reminderService.initialize();
+  runApp(MiaoJiZhangApp(reminderService: reminderService));
 }
 
 const _bgColor = Color(0xFFFFF7F2);
@@ -25,18 +29,21 @@ enum RecordType { expense, income }
 enum StatsRange { day, week, month, year }
 
 class MiaoJiZhangApp extends StatefulWidget {
-  const MiaoJiZhangApp({super.key});
+  const MiaoJiZhangApp({super.key, required this.reminderService});
+
+  final ReminderService reminderService;
 
   @override
   State<MiaoJiZhangApp> createState() => _MiaoJiZhangAppState();
 }
 
 class _MiaoJiZhangAppState extends State<MiaoJiZhangApp> {
-  final AppStore store = AppStore();
+  late final AppStore store;
 
   @override
   void initState() {
     super.initState();
+    store = AppStore(reminderService: widget.reminderService);
     store.load();
   }
 
@@ -116,6 +123,10 @@ class AppStore extends ChangeNotifier {
   static const _storageKey = 'miao_jizhang_data_v2';
   static const _legacyStorageKey = 'miao_jizhang_data_v1';
 
+  AppStore({required this.reminderService});
+
+  final ReminderService reminderService;
+
   bool isLoaded = false;
   bool reminderEnabled = true;
   double monthlyBudget = 0;
@@ -133,6 +144,7 @@ class AppStore extends ChangeNotifier {
       _resetToEmpty();
       isLoaded = true;
       await _save();
+      await _syncReminderSchedule();
       notifyListeners();
       return;
     }
@@ -159,6 +171,7 @@ class AppStore extends ChangeNotifier {
       );
     records.sort((a, b) => b.date.compareTo(a.date));
     isLoaded = true;
+    await _syncReminderSchedule();
     notifyListeners();
   }
 
@@ -245,12 +258,14 @@ class AppStore extends ChangeNotifier {
     reminderEnabled = value;
     notifyListeners();
     await _save();
+    await _syncReminderSchedule();
   }
 
   Future<void> clearAll() async {
     _resetToEmpty();
     notifyListeners();
     await _save();
+    await _syncReminderSchedule();
   }
 
   double get monthExpense => _sumCurrentMonth(RecordType.expense);
@@ -410,6 +425,10 @@ class AppStore extends ChangeNotifier {
       'records': records.map((record) => record.toJson()).toList(),
     };
     await prefs.setString(_storageKey, jsonEncode(data));
+  }
+
+  Future<void> _syncReminderSchedule() {
+    return reminderService.setDailyReminderEnabled(reminderEnabled);
   }
 
   void _resetToEmpty() {
