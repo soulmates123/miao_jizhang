@@ -606,7 +606,7 @@ const expenseCategories = [
   CategoryOption('服饰', Icons.checkroom_rounded),
   CategoryOption('家居', Icons.chair_rounded),
   CategoryOption('数码', Icons.devices_rounded),
-  CategoryOption('保险', Icons.health_and_safety_rounded),
+  CategoryOption('红包', Icons.redeem_rounded),
   CategoryOption('还款', Icons.credit_card_rounded),
   CategoryOption('公益', Icons.favorite_rounded),
   CategoryOption('其他', Icons.more_horiz_rounded),
@@ -642,6 +642,7 @@ String normalizeCategoryName(String category) {
   if (category == '住房') return '谷子';
   if (category == '育儿') return '水果';
   if (category == '人情') return '饮品';
+  if (category == '保险') return '红包';
   return category;
 }
 
@@ -693,8 +694,6 @@ Color categoryAccentColor(String category) {
       return const Color(0xFF8AC46D);
     case '数码':
       return const Color(0xFF5E8CFF);
-    case '保险':
-      return const Color(0xFF56B88E);
     case '还款':
       return const Color(0xFF6D89FF);
     case '公益':
