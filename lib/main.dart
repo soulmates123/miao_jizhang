@@ -4613,7 +4613,7 @@ class AboutUsPage extends StatelessWidget {
             ),
             const AboutInfoCard(
               title: '基础信息',
-              content: '版本：1.0.0\n适用场景：个人日常记账、分类预算、消费统计',
+              content: '版本：1.0.1\n适用场景：个人日常记账、分类预算、消费统计',
               icon: Icons.apps_rounded,
             ),
             const AboutInfoCard(
