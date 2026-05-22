@@ -274,9 +274,14 @@ class AppStore extends ChangeNotifier {
   double get lastMonthExpense => _sumMonthOffset(RecordType.expense, -1);
   double get lastMonthIncome => _sumMonthOffset(RecordType.income, -1);
   double get lastMonthBalance => lastMonthIncome - lastMonthExpense;
-  double get budgetLeft => monthlyBudget - monthExpense;
-  double get budgetRatio =>
-      monthlyBudget <= 0 ? 0 : (monthExpense / monthlyBudget).clamp(0, 1);
+  double get categoryBudgetTotal =>
+      categoryBudgets.fold<double>(0, (sum, budget) => sum + budget.limit);
+  double get effectiveMonthlyBudget =>
+      monthlyBudget > 0 ? monthlyBudget : categoryBudgetTotal;
+  double get budgetLeft => effectiveMonthlyBudget - monthExpense;
+  double get budgetRatio => effectiveMonthlyBudget <= 0
+      ? 0
+      : (monthExpense / effectiveMonthlyBudget).clamp(0, 1);
   double get goalRatio => savingGoalTarget <= 0
       ? 0
       : (savingGoalSaved / savingGoalTarget).clamp(0, 1);
@@ -606,7 +611,7 @@ const expenseCategories = [
   CategoryOption('服饰', Icons.checkroom_rounded),
   CategoryOption('家居', Icons.chair_rounded),
   CategoryOption('数码', Icons.devices_rounded),
-  CategoryOption('保险', Icons.health_and_safety_rounded),
+  CategoryOption('红包', Icons.redeem_rounded),
   CategoryOption('还款', Icons.credit_card_rounded),
   CategoryOption('公益', Icons.favorite_rounded),
   CategoryOption('其他', Icons.more_horiz_rounded),
@@ -642,6 +647,7 @@ String normalizeCategoryName(String category) {
   if (category == '住房') return '谷子';
   if (category == '育儿') return '水果';
   if (category == '人情') return '饮品';
+  if (category == '保险') return '红包';
   return category;
 }
 
@@ -1212,17 +1218,14 @@ class LoginPage extends StatelessWidget {
                     fit: BoxFit.cover,
                   ),
                 ),
-                const SizedBox(height: 20),
-                const Text(
-                  '喵记账',
-                  style: TextStyle(
-                    fontSize: 42,
-                    fontWeight: FontWeight.w900,
-                    color: _textColor,
-                    letterSpacing: 2,
-                  ),
+                const SizedBox(height: 18),
+                Image.asset(
+                  'assets/images/app_name.png',
+                  width: 184,
+                  height: 74,
+                  fit: BoxFit.contain,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 const Text(
                   '每一笔，都值得被认真记录',
                   style: TextStyle(
@@ -1310,19 +1313,9 @@ class _MainPageState extends State<MainPage> {
                 ],
               ),
             ),
-      body: Stack(
-        children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            child: KeyedSubtree(
-              key: ValueKey(currentIndex),
-              child: AppScope.of(context).isLoaded
-                  ? pages[currentIndex]
-                  : const Center(child: CircularProgressIndicator()),
-            ),
-          ),
-        ],
-      ),
+      body: AppScope.of(context).isLoaded
+          ? IndexedStack(index: currentIndex, children: pages)
+          : const Center(child: CircularProgressIndicator()),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -1344,7 +1337,10 @@ class _MainPageState extends State<MainPage> {
           unselectedItemColor: const Color(0xFFB89A90),
           selectedFontSize: 12,
           unselectedFontSize: 12,
-          onTap: (index) => setState(() => currentIndex = index),
+          onTap: (index) {
+            if (index == currentIndex) return;
+            setState(() => currentIndex = index);
+          },
           items: const [
             BottomNavigationBarItem(
               icon: CatNavIcon(icon: Icons.home_rounded),
@@ -1352,11 +1348,8 @@ class _MainPageState extends State<MainPage> {
               label: '首页',
             ),
             BottomNavigationBarItem(
-              icon: CatNavIcon(icon: Icons.savings_rounded),
-              activeIcon: CatNavIcon(
-                icon: Icons.savings_rounded,
-                selected: true,
-              ),
+              icon: CatNavIcon(icon: Icons.pets_rounded),
+              activeIcon: CatNavIcon(icon: Icons.pets_rounded, selected: true),
               label: '预算',
             ),
             BottomNavigationBarItem(
@@ -1425,49 +1418,55 @@ class _HomePageState extends State<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const HomeCoverCard(),
-            Row(
-              children: [
-                Expanded(
-                  child: HomeSummaryMiniCard(
-                    title: '本月支出',
-                    amount: money(store.monthExpense),
-                    compareText: monthCompareText(
-                      store.monthExpense,
-                      store.lastMonthExpense,
+            SizedBox(
+              height: 116,
+              child: Transform.translate(
+                offset: const Offset(0, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: HomeSummaryMiniCard(
+                        title: '本月支出',
+                        amount: money(store.monthExpense),
+                        compareText: monthCompareText(
+                          store.monthExpense,
+                          store.lastMonthExpense,
+                        ),
+                        backgroundColor: const Color(0xFFFFBFC9),
+                        accentColor: _primaryColor,
+                      ),
                     ),
-                    backgroundColor: const Color(0xFFFFC8CD),
-                    accentColor: _primaryColor,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: HomeSummaryMiniCard(
-                    title: '本月收入',
-                    amount: money(store.monthIncome),
-                    compareText: monthCompareText(
-                      store.monthIncome,
-                      store.lastMonthIncome,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: HomeSummaryMiniCard(
+                        title: '本月收入',
+                        amount: money(store.monthIncome),
+                        compareText: monthCompareText(
+                          store.monthIncome,
+                          store.lastMonthIncome,
+                        ),
+                        backgroundColor: const Color(0xFFFFE2AE),
+                        accentColor: const Color(0xFFE7A83A),
+                      ),
                     ),
-                    backgroundColor: const Color(0xFFFFE6B8),
-                    accentColor: const Color(0xFFE7A83A),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: HomeSummaryMiniCard(
-                    title: '本月结余',
-                    amount: money(store.monthBalance),
-                    compareText: monthCompareText(
-                      store.monthBalance,
-                      store.lastMonthBalance,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: HomeSummaryMiniCard(
+                        title: '本月结余',
+                        amount: money(store.monthBalance),
+                        compareText: monthCompareText(
+                          store.monthBalance,
+                          store.lastMonthBalance,
+                        ),
+                        backgroundColor: const Color(0xFFD8EFCF),
+                        accentColor: const Color(0xFF62AF72),
+                      ),
                     ),
-                    backgroundColor: const Color(0xFFDDF1D5),
-                    accentColor: const Color(0xFF62AF72),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             HomeBudgetProgressCard(store: store),
             const SizedBox(height: 12),
             HomeTodayOverviewCard(
@@ -1483,7 +1482,7 @@ class _HomePageState extends State<HomePage> {
                 );
               },
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
             Row(
               children: [
                 const SectionTitle(title: '账单记录'),
@@ -1502,7 +1501,7 @@ class _HomePageState extends State<HomePage> {
                 subtitle: '去「记账」页添加这一月的收支吧',
               )
             else
-              ...monthRecords.map((record) => RecordItem(record: record)),
+              RecordGroupList(records: monthRecords),
           ],
         ),
       ),
@@ -1601,7 +1600,7 @@ class HomeBudgetProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio = store.monthlyBudget <= 0 ? 0.0 : store.budgetRatio;
+    final ratio = store.effectiveMonthlyBudget <= 0 ? 0.0 : store.budgetRatio;
     final percent = '${(ratio * 100).round()}%';
     final leftTitle = store.budgetLeft >= 0 ? '剩余' : '超出';
 
@@ -1616,7 +1615,7 @@ class HomeBudgetProgressCard extends StatelessWidget {
               Expanded(
                 child: HomeInfoMetric(
                   title: '总预算',
-                  value: money(store.monthlyBudget),
+                  value: money(store.effectiveMonthlyBudget),
                 ),
               ),
               HomeInfoMetric(
@@ -1717,20 +1716,25 @@ class HomeTodayOverviewCard extends StatelessWidget {
                   title: '支出',
                   value: money(expense),
                   valueColor: _textColor,
+                  backgroundColor: const Color(0xFFFFBFC9),
                 ),
               ),
+              const SizedBox(width: 2),
               Expanded(
                 child: HomeTodayMetric(
                   title: '收入',
                   value: money(income),
                   valueColor: _textColor,
+                  backgroundColor: const Color(0xFFFFE2AE),
                 ),
               ),
+              const SizedBox(width: 2),
               Expanded(
                 child: HomeTodayMetric(
                   title: '结余',
                   value: money(balance),
                   valueColor: balance >= 0 ? _greenColor : _primaryColor,
+                  backgroundColor: const Color(0xFFD8EFCF),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1834,11 +1838,15 @@ class HomeTodayMetric extends StatelessWidget {
     required this.title,
     required this.value,
     required this.valueColor,
+    this.backgroundColor = const Color(0xFFF1FAEF),
+    this.borderRadius = const BorderRadius.all(Radius.circular(14)),
   });
 
   final String title;
   final String value;
   final Color valueColor;
+  final Color backgroundColor;
+  final BorderRadiusGeometry borderRadius;
 
   @override
   Widget build(BuildContext context) {
@@ -1846,8 +1854,8 @@ class HomeTodayMetric extends StatelessWidget {
       constraints: const BoxConstraints(minHeight: 58),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1FAEF),
-        borderRadius: BorderRadius.circular(14),
+        color: backgroundColor,
+        borderRadius: borderRadius,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1978,29 +1986,26 @@ class HomeCoverCard extends StatelessWidget {
             Positioned.fill(
               child: Container(color: Colors.white.withValues(alpha: 0.06)),
             ),
-            const Positioned(
+            Positioned(
               left: 18,
-              top: 10,
-              child: Text(
-                '喵记账',
-                style: TextStyle(
-                  color: _textColor,
-                  fontSize: 30,
-                  fontWeight: FontWeight.w900,
-                ),
+              top: 6,
+              child: Image.asset(
+                'assets/images/app_name.png',
+                width: 148,
+                height: 60,
+                fit: BoxFit.contain,
               ),
             ),
-            const Positioned(left: 112, top: 22, child: CatWhiskerMark()),
             Positioned(
-              left: 32,
+              left: 38,
               bottom: 22,
               child: SpeechBubble(
                 child: const Text(
                   '今天也要\n好好记账喵～',
                   style: TextStyle(
                     color: _textColor,
-                    fontSize: 14,
-                    height: 1.45,
+                    fontSize: 16,
+                    height: 1.35,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -2034,17 +2039,17 @@ class HomeSummaryMiniCard extends StatelessWidget {
     final positive = !compareText.contains('-');
     final compareColor = positive ? const Color(0xFF47A76A) : _primaryColor;
     return Container(
-      height: 124,
-      padding: const EdgeInsets.fromLTRB(12, 13, 10, 12),
+      height: 128,
+      padding: const EdgeInsets.fromLTRB(13, 15, 11, 14),
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.78)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.88)),
         boxShadow: [
           BoxShadow(
-            color: accentColor.withValues(alpha: 0.12),
-            blurRadius: 14,
-            offset: const Offset(0, 8),
+            color: accentColor.withValues(alpha: 0.14),
+            blurRadius: 16,
+            offset: const Offset(0, 9),
           ),
         ],
       ),
@@ -2066,11 +2071,11 @@ class HomeSummaryMiniCard extends StatelessWidget {
                 maxLines: 1,
                 style: const TextStyle(
                   color: _textColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 15),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
@@ -2079,7 +2084,7 @@ class HomeSummaryMiniCard extends StatelessWidget {
                   maxLines: 1,
                   style: const TextStyle(
                     color: Color(0xFF3F2C29),
-                    fontSize: 18,
+                    fontSize: 20,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -2091,7 +2096,7 @@ class HomeSummaryMiniCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: compareColor,
-                  fontSize: 11,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -2423,7 +2428,7 @@ class _AddRecordPageState extends State<AddRecordPage> {
       context,
       previousAchievements: previousAchievements,
       store: store,
-      fallbackMessage: '已保存这笔记录',
+      fallbackMessage: '喵~又有一笔新的记账！',
     );
     widget.onSaved();
   }
@@ -2446,7 +2451,7 @@ class RecordAmountPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
       decoration: BoxDecoration(
         color: _bgColor,
         boxShadow: [
@@ -2474,7 +2479,7 @@ class RecordAmountPanel extends StatelessWidget {
             Column(
               children: [
                 SegmentedRecordType(value: type, onChanged: onTypeChanged),
-                const SizedBox(height: 28),
+                const SizedBox(height: 18),
                 TextField(
                   controller: amountController,
                   keyboardType: const TextInputType.numberWithOptions(
@@ -2483,7 +2488,7 @@ class RecordAmountPanel extends StatelessWidget {
                   inputFormatters: [AmountInputFormatter()],
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 44,
+                    fontSize: 38,
                     fontWeight: FontWeight.w900,
                     color: _textColor,
                   ),
@@ -2492,7 +2497,7 @@ class RecordAmountPanel extends StatelessWidget {
                     hintText: '00.00',
                     hintStyle: TextStyle(
                       color: Color(0x555B3A32),
-                      fontSize: 38,
+                      fontSize: 34,
                       fontWeight: FontWeight.w700,
                     ),
                     border: InputBorder.none,
@@ -2546,7 +2551,7 @@ class RecordBottomPanel extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
         decoration: BoxDecoration(
           color: _bgColor,
           boxShadow: [
@@ -2596,7 +2601,7 @@ class RecordBottomPanel extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 6),
             SizedBox(
               width: double.infinity,
               child: CatPawPrimaryButton(label: buttonText, onPressed: onSave),
@@ -2804,7 +2809,7 @@ class StatsPage extends StatefulWidget {
 
 class _StatsPageState extends State<StatsPage> {
   RecordType selectedType = RecordType.expense;
-  StatsRange range = StatsRange.day;
+  StatsRange range = StatsRange.week;
   DateTime selectedDate = DateTime.now();
 
   @override
@@ -2825,10 +2830,6 @@ class _StatsPageState extends State<StatsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SectionTitle(
-            title: '${statsRangeLabel(range, anchorDate: selectedDate)}统计',
-          ),
-          const SizedBox(height: 12),
           SegmentedRecordType(
             value: selectedType,
             onChanged: (value) => setState(() => selectedType = value),
@@ -2877,7 +2878,7 @@ class StatsRangeTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ranges = StatsRange.values;
+    const ranges = [StatsRange.week, StatsRange.month, StatsRange.year];
     return Container(
       height: 44,
       padding: const EdgeInsets.all(4),
@@ -3098,7 +3099,7 @@ class _MonthPickerSheetState extends State<MonthPickerSheet> {
   }
 }
 
-class ExpenseTrendCard extends StatelessWidget {
+class ExpenseTrendCard extends StatefulWidget {
   const ExpenseTrendCard({
     super.key,
     required this.type,
@@ -3117,62 +3118,52 @@ class ExpenseTrendCard extends StatelessWidget {
   final int recordCount;
 
   @override
+  State<ExpenseTrendCard> createState() => _ExpenseTrendCardState();
+}
+
+class _ExpenseTrendCardState extends State<ExpenseTrendCard> {
+  int? selectedBarIndex;
+
+  @override
+  void didUpdateWidget(covariant ExpenseTrendCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.type != widget.type ||
+        oldWidget.range != widget.range ||
+        oldWidget.anchorDate != widget.anchorDate ||
+        oldWidget.points.length != widget.points.length) {
+      selectedBarIndex = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final typeLabel = recordTypeLabel(type);
-    final maxPoint = points.isEmpty
-        ? null
-        : points.reduce(
-            (a, b) => a.amountFor(type) >= b.amountFor(type) ? a : b,
-          );
-    final maxAmount = maxPoint?.amountFor(type) ?? 0;
+    final typeLabel = recordTypeLabel(widget.type);
+    final points = widget.points;
     final activeDays = points
-        .where((point) => point.amountFor(type) > 0)
+        .where((point) => point.amountFor(widget.type) > 0)
         .length;
-    final average = activeDays == 0 ? 0.0 : total / activeDays;
+    final average = activeDays == 0 ? 0.0 : widget.total / activeDays;
 
     return ReportCard(
       title: '$typeLabel趋势',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            maxAmount <= 0
-                ? '${statsRangeLabel(range, anchorDate: anchorDate)}暂无$typeLabel'
-                : '${statsRangeLabel(range, anchorDate: anchorDate)}最高$typeLabel',
-            style: const TextStyle(color: _mutedColor, fontSize: 14),
-          ),
-          const SizedBox(height: 6),
-          RichText(
-            text: TextSpan(
-              style: const TextStyle(
-                color: Color(0xFF2F7F66),
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-              children: [
-                TextSpan(
-                  text: maxAmount <= 0
-                      ? '记下一笔后，会生成趋势'
-                      : '在 ${maxPoint!.detailLabel}，你${type == RecordType.expense ? '支出' : '收入'}了 ',
-                ),
-                if (maxAmount > 0)
-                  TextSpan(
-                    text: money(maxAmount),
-                    style: const TextStyle(color: _primaryColor),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
           Row(
             children: [
+              Expanded(
+                child: MiniMetric(
+                  title: '总$typeLabel',
+                  value: money(widget.total),
+                ),
+              ),
               Expanded(
                 child: MiniMetric(title: '平均$typeLabel', value: money(average)),
               ),
               Expanded(
                 child: MiniMetric(
                   title: '$typeLabel笔数',
-                  value: '$recordCount笔',
+                  value: '${widget.recordCount}笔',
                 ),
               ),
             ],
@@ -3180,20 +3171,41 @@ class ExpenseTrendCard extends StatelessWidget {
           const SizedBox(height: 18),
           SizedBox(
             height: 190,
-            child: CustomPaint(
-              painter: TrendLinePainter(points),
-              child: const SizedBox.expand(),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final chartSize = Size(constraints.maxWidth, 190);
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (details) {
+                    final index = trendBarIndexAt(
+                      details.localPosition,
+                      chartSize,
+                      points.length,
+                    );
+                    setState(() => selectedBarIndex = index);
+                  },
+                  child: CustomPaint(
+                    painter: TrendBarPainter(
+                      points: points,
+                      type: widget.type,
+                      selectedIndex: selectedBarIndex,
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
+                );
+              },
             ),
           ),
           const SizedBox(height: 10),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              ChartLegend(color: _primaryColor, label: '支出'),
-              SizedBox(width: 28),
-              ChartLegend(color: Color(0xFF9EA4AA), label: '收入'),
-              SizedBox(width: 28),
-              ChartLegend(color: Color(0xFF7EBE9F), label: '结余'),
+              ChartLegend(
+                color: widget.type == RecordType.expense
+                    ? _primaryColor
+                    : _greenColor,
+                label: '$typeLabel总额',
+              ),
             ],
           ),
         ],
@@ -3233,10 +3245,32 @@ class ExpenseOverviewCard extends StatelessWidget {
                   child: CustomPaint(
                     painter: DonutPainter(stats),
                     child: Center(
-                      child: Text(
-                        '本期$typeLabel\n${money(total)}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: _mutedColor),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '总$typeLabel',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: _mutedColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              money(total),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: _textColor,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -3422,12 +3456,17 @@ class MiniMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text(title, style: const TextStyle(color: _mutedColor)),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: _mutedColor),
+        ),
         const SizedBox(height: 6),
         Text(
           value,
+          textAlign: TextAlign.center,
           style: const TextStyle(
             color: _textColor,
             fontSize: 16,
@@ -3635,23 +3674,30 @@ class DonutPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    final stroke = size.width * 0.16;
+    final stroke = size.width * 0.14;
+    final arcRect = rect.deflate(stroke / 2);
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = stroke
-      ..strokeCap = StrokeCap.round;
+      ..strokeCap = StrokeCap.butt;
+
+    paint.color = const Color(0xFFFFF1F4);
+    canvas.drawArc(arcRect, 0, math.pi * 2, false, paint);
 
     if (stats.isEmpty) {
       paint.color = _softColor;
-      canvas.drawArc(rect.deflate(stroke / 2), 0, math.pi * 2, false, paint);
+      canvas.drawArc(arcRect, 0, math.pi * 2, false, paint);
       return;
     }
 
     var start = -math.pi / 2;
+    const gap = 0.018;
     for (var i = 0; i < stats.length; i++) {
       final sweep = math.pi * 2 * stats[i].ratio;
+      if (sweep <= 0) continue;
       paint.color = colors[i % colors.length];
-      canvas.drawArc(rect.deflate(stroke / 2), start, sweep, false, paint);
+      final visibleSweep = math.max(0.0, sweep - gap);
+      canvas.drawArc(arcRect, start + gap / 2, visibleSweep, false, paint);
       start += sweep;
     }
   }
@@ -3662,16 +3708,22 @@ class DonutPainter extends CustomPainter {
   }
 }
 
-class TrendLinePainter extends CustomPainter {
-  TrendLinePainter(this.points);
+class TrendBarPainter extends CustomPainter {
+  TrendBarPainter({
+    required this.points,
+    required this.type,
+    this.selectedIndex,
+  });
 
   final List<TrendPoint> points;
+  final RecordType type;
+  final int? selectedIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
-    const left = 28.0;
+    const left = 34.0;
     const top = 8.0;
-    const bottom = 24.0;
+    const bottom = 28.0;
     const right = 8.0;
     final chart = Rect.fromLTWH(
       left,
@@ -3680,17 +3732,14 @@ class TrendLinePainter extends CustomPainter {
       size.height - top - bottom,
     );
     final gridPaint = Paint()
-      ..color = const Color(0xFFE9E2DA)
+      ..color = const Color(0xFFEFE5DE)
       ..strokeWidth = 1;
     final textPainter = TextPainter(textDirection: TextDirection.ltr);
     final maxValue = math.max(
       1,
       points.fold<double>(
         0,
-        (max, point) => math.max(
-          max,
-          math.max(point.expense, math.max(point.income, point.balance.abs())),
-        ),
+        (max, point) => math.max(max, point.amountFor(type)),
       ),
     );
 
@@ -3707,84 +3756,96 @@ class TrendLinePainter extends CustomPainter {
 
     if (points.isEmpty) return;
 
-    List<Offset> offsetsFor(double Function(TrendPoint point) selector) {
-      return List.generate(points.length, (index) {
-        final x = points.length == 1
-            ? chart.center.dx
-            : chart.left + chart.width * index / (points.length - 1);
-        final value = selector(points[index]);
-        final y = chart.bottom - chart.height * (value / maxValue);
-        return Offset(x, y.clamp(chart.top, chart.bottom));
-      });
-    }
+    final barColor = type == RecordType.expense ? _primaryColor : _greenColor;
+    final groupWidth = chart.width / points.length;
+    final barWidth = math.max(5.0, math.min(24.0, groupWidth * 0.52));
+    final barPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [barColor, barColor.withValues(alpha: 0.48)],
+      ).createShader(chart);
 
-    void drawSeries(List<Offset> offsets, Color color) {
-      final paint = Paint()
-        ..color = color
-        ..strokeWidth = 2
-        ..style = PaintingStyle.stroke;
-      final path = Path()..moveTo(offsets.first.dx, offsets.first.dy);
-      for (final offset in offsets.skip(1)) {
-        path.lineTo(offset.dx, offset.dy);
-      }
-      canvas.drawPath(path, paint);
-      final dotPaint = Paint()..color = Colors.white;
-      final borderPaint = Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5;
-      for (final offset in offsets) {
-        canvas.drawCircle(offset, 3, dotPaint);
-        canvas.drawCircle(offset, 3, borderPaint);
-      }
-    }
-
-    drawSeries(offsetsFor((point) => point.expense), _primaryColor);
-    drawSeries(offsetsFor((point) => point.income), const Color(0xFF9EA4AA));
-    drawSeries(
-      offsetsFor((point) => math.max(0, point.balance)),
-      const Color(0xFF7EBE9F),
-    );
-
-    final maxExpense = points.reduce((a, b) => a.expense >= b.expense ? a : b);
-    if (maxExpense.expense > 0) {
-      final index = points.indexOf(maxExpense);
-      final offset = offsetsFor((point) => point.expense)[index];
-      final guidePaint = Paint()
-        ..color = const Color(0xFFC7BFB7)
-        ..strokeWidth = 1;
-      canvas.drawLine(
-        Offset(offset.dx, chart.top),
-        Offset(offset.dx, chart.bottom),
-        guidePaint,
+    for (var i = 0; i < points.length; i++) {
+      final value = points[i].amountFor(type);
+      final x = chart.left + groupWidth * i + groupWidth / 2;
+      final barHeight = value <= 0
+          ? 2.0
+          : math.max(5.0, chart.height * value / maxValue);
+      final rect = Rect.fromLTWH(
+        x - barWidth / 2,
+        chart.bottom - barHeight,
+        barWidth,
+        barHeight,
       );
-      final label = '${maxExpense.detailLabel}\n支出${money(maxExpense.expense)}';
+      final radius = Radius.circular(math.min(7, barWidth / 2));
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          rect,
+          topLeft: radius,
+          topRight: radius,
+          bottomLeft: const Radius.circular(2),
+          bottomRight: const Radius.circular(2),
+        ),
+        value <= 0 ? (Paint()..color = const Color(0xFFF3E7DF)) : barPaint,
+      );
+    }
+
+    final selected = selectedIndex;
+    if (selected != null && selected >= 0 && selected < points.length) {
+      final point = points[selected];
+      final value = point.amountFor(type);
+      final x = chart.left + groupWidth * selected + groupWidth / 2;
+      final barHeight = value <= 0
+          ? 2.0
+          : math.max(5.0, chart.height * value / maxValue);
+      final y = chart.bottom - barHeight;
+      final selectedPaint = Paint()
+        ..color = barColor.withValues(alpha: 0.18)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          Rect.fromLTWH(x - barWidth / 2, y, barWidth, barHeight),
+          topLeft: Radius.circular(math.min(7, barWidth / 2)),
+          topRight: Radius.circular(math.min(7, barWidth / 2)),
+          bottomLeft: const Radius.circular(2),
+          bottomRight: const Radius.circular(2),
+        ),
+        selectedPaint,
+      );
+
+      final label =
+          '${point.detailLabel}\n${recordTypeLabel(type)} ${money(value)}';
       textPainter.text = TextSpan(
         text: label,
-        style: const TextStyle(color: Colors.white, fontSize: 10),
-      );
-      textPainter.layout();
-      final labelRect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          (offset.dx - textPainter.width / 2 - 6).clamp(0, size.width - 70),
-          math.max(chart.top + 4, offset.dy - 44),
-          textPainter.width + 12,
-          textPainter.height + 8,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          height: 1.25,
         ),
-        const Radius.circular(6),
+      );
+      textPainter.textAlign = TextAlign.center;
+      textPainter.layout();
+      final labelWidth = textPainter.width + 18;
+      final labelHeight = textPainter.height + 12;
+      final left = (x - labelWidth / 2).clamp(0.0, size.width - labelWidth);
+      final top = math.max(0.0, y - labelHeight - 8);
+      final labelRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(left, top, labelWidth, labelHeight),
+        const Radius.circular(8),
       );
       canvas.drawRRect(
         labelRect,
-        Paint()..color = Colors.black.withValues(alpha: 0.45),
+        Paint()..color = _textColor.withValues(alpha: 0.72),
       );
-      textPainter.paint(canvas, Offset(labelRect.left + 6, labelRect.top + 4));
+      textPainter.paint(canvas, Offset(left + 9, top + 6));
     }
 
     final step = math.max(1, (points.length / 6).ceil());
     for (var i = 0; i < points.length; i += step) {
-      final x = points.length == 1
-          ? chart.center.dx
-          : chart.left + chart.width * i / (points.length - 1);
+      final x = chart.left + groupWidth * i + groupWidth / 2;
       textPainter.text = TextSpan(
         text: points[i].label,
         style: const TextStyle(color: Color(0xFFB8AEA5), fontSize: 10),
@@ -3792,15 +3853,35 @@ class TrendLinePainter extends CustomPainter {
       textPainter.layout();
       textPainter.paint(
         canvas,
-        Offset(x - textPainter.width / 2, chart.bottom + 7),
+        Offset(x - textPainter.width / 2, chart.bottom + 8),
       );
     }
   }
 
   @override
-  bool shouldRepaint(covariant TrendLinePainter oldDelegate) {
-    return oldDelegate.points != points;
+  bool shouldRepaint(covariant TrendBarPainter oldDelegate) {
+    return oldDelegate.points != points ||
+        oldDelegate.type != type ||
+        oldDelegate.selectedIndex != selectedIndex;
   }
+}
+
+int? trendBarIndexAt(Offset offset, Size size, int pointCount) {
+  if (pointCount <= 0) return null;
+  const left = 34.0;
+  const top = 8.0;
+  const bottom = 28.0;
+  const right = 8.0;
+  final chart = Rect.fromLTWH(
+    left,
+    top,
+    size.width - left - right,
+    size.height - top - bottom,
+  );
+  if (!chart.inflate(12).contains(offset)) return null;
+  final groupWidth = chart.width / pointCount;
+  final index = ((offset.dx - chart.left) / groupWidth).floor();
+  return index.clamp(0, pointCount - 1);
 }
 
 class BudgetPage extends StatelessWidget {
@@ -3830,7 +3911,7 @@ class BudgetPage extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          '总预算 ${money(store.monthlyBudget)}',
+                          '总预算 ${money(store.effectiveMonthlyBudget)}',
                           style: const TextStyle(
                             fontSize: 20,
                             color: _textColor,
@@ -4155,13 +4236,18 @@ class _CategoryBudgetEditPageState extends State<CategoryBudgetEditPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
+        centerTitle: true,
         title: Text(budget == null ? '添加分类预算' : '编辑分类预算'),
         actions: [
           if (budget != null)
             IconButton(
               tooltip: '删除',
-              onPressed: () =>
-                  confirmDeleteCategoryBudget(context, store, budget),
+              onPressed: () => confirmDeleteCategoryBudget(
+                context,
+                store,
+                budget,
+                popAfterDelete: true,
+              ),
               icon: const Icon(Icons.delete_rounded),
             ),
         ],
@@ -4434,33 +4520,6 @@ class MinePage extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFEFE6),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _primaryColor.withValues(alpha: 0.12)),
-            ),
-            child: Row(
-              children: [
-                const CatPawMark(size: 20, color: _primaryColor),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    store.monthBalance >= 0
-                        ? '本月小猫攒下了 ${money(store.monthBalance)}'
-                        : '本月小猫多花了 ${money(store.monthBalance.abs())}',
-                    style: const TextStyle(
-                      color: _mutedColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 18),
           MineSwitchTile(
             icon: Icons.notifications_rounded,
@@ -4471,22 +4530,164 @@ class MinePage extends StatelessWidget {
           MineTile(
             icon: Icons.emoji_events_rounded,
             title: '成就徽章',
-            subtitle:
-                '${store.records.length} 笔记录，本月结余 ${money(store.monthBalance)}',
             onTap: () => showAchievementDialog(context, store),
           ),
           MineTile(
-            icon: Icons.download_done_rounded,
-            title: '数据状态',
-            subtitle: '已自动保存在本机',
-            onTap: () => showToast(context, '数据会自动保存在本机'),
+            icon: Icons.info_rounded,
+            title: '关于我们',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AboutUsPage()),
+              );
+            },
           ),
           MineTile(
             icon: Icons.delete_sweep_rounded,
             title: '清空数据',
-            subtitle: '删除所有记账记录和储蓄进度',
             danger: true,
             onTap: () => confirmClearData(context, store),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AboutUsPage extends StatelessWidget {
+  const AboutUsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('关于我们'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
+              decoration: whiteCardDecoration(),
+              child: Column(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Image.asset(
+                      'assets/images/app_icon.png',
+                      width: 82,
+                      height: 82,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Image.asset(
+                    'assets/images/app_name.png',
+                    width: 160,
+                    height: 64,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '一款可爱的本地记账小工具',
+                    style: TextStyle(
+                      color: _mutedColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const AboutInfoCard(
+              title: '软件简介',
+              content: '喵记账用于记录日常支出、收入、预算和储蓄进度，帮助你用更轻松的方式了解每月花销。',
+              icon: Icons.auto_awesome_rounded,
+            ),
+            const AboutInfoCard(
+              title: '基础信息',
+              content: '版本：1.0.0\n适用场景：个人日常记账、分类预算、消费统计',
+              icon: Icons.apps_rounded,
+            ),
+            const AboutInfoCard(
+              title: '数据说明',
+              content: '所有账单、预算和储蓄数据会自动保存在本机，不会上传到云端。',
+              icon: Icons.verified_user_rounded,
+            ),
+            const AboutInfoCard(
+              title: '功能能力',
+              content: '支持账单记录、月度预算、分类预算、统计图表、账本提醒和成就徽章。',
+              icon: Icons.favorite_rounded,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AboutInfoCard extends StatelessWidget {
+  const AboutInfoCard({
+    super.key,
+    required this.title,
+    required this.content,
+    required this.icon,
+  });
+
+  final String title;
+  final String content;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: whiteCardDecoration(),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _softColor,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, color: _primaryColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  content,
+                  style: const TextStyle(
+                    color: _mutedColor,
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -4557,6 +4758,7 @@ class _TodayOverviewDetailPageState extends State<TodayOverviewDetailPage> {
         title: const Text('今日概览'),
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
+        centerTitle: true,
       ),
       body: Stack(
         children: [
@@ -4596,9 +4798,7 @@ class _TodayOverviewDetailPageState extends State<TodayOverviewDetailPage> {
                       subtitle: '去「记账」页添加后，这里会自动显示',
                     )
                   else
-                    ...selectedRecords.map(
-                      (record) => RecordItem(record: record),
-                    ),
+                    RecordGroupList(records: selectedRecords),
                 ],
               ),
             ),
@@ -4748,6 +4948,234 @@ class TodayRecordTabButton extends StatelessWidget {
   }
 }
 
+class RecordGroupList extends StatelessWidget {
+  const RecordGroupList({super.key, required this.records});
+
+  final List<AccountRecord> records;
+
+  @override
+  Widget build(BuildContext context) {
+    final sortedRecords = [...records]
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final groups = <DateTime, List<AccountRecord>>{};
+    for (final record in sortedRecords) {
+      final day = DateTime(
+        record.date.year,
+        record.date.month,
+        record.date.day,
+      );
+      groups.putIfAbsent(day, () => []).add(record);
+    }
+
+    return Column(
+      children: groups.entries.map((entry) {
+        final dayRecords = entry.value;
+        final expenseTotal = dayRecords
+            .where((record) => record.type == RecordType.expense)
+            .fold<double>(0, (sum, record) => sum + record.amount);
+        final incomeTotal = dayRecords
+            .where((record) => record.type == RecordType.income)
+            .fold<double>(0, (sum, record) => sum + record.amount);
+        return Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.fromLTRB(0, 4, 0, 2),
+          decoration: whiteCardDecoration(),
+          child: Column(
+            children: [
+              RecordDateHeader(
+                day: entry.key,
+                expenseTotal: expenseTotal,
+                incomeTotal: incomeTotal,
+              ),
+              ...dayRecords.map((record) => CompactRecordItem(record: record)),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class RecordDateHeader extends StatelessWidget {
+  const RecordDateHeader({
+    super.key,
+    required this.day,
+    required this.expenseTotal,
+    required this.incomeTotal,
+  });
+
+  final DateTime day;
+  final double expenseTotal;
+  final double incomeTotal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 14,
+            decoration: BoxDecoration(
+              color: _primaryColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            formatMonthDay(day),
+            style: const TextStyle(
+              color: Color(0xFFAFA5A0),
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '星期${weekdayLabel(day.weekday)}',
+            style: const TextStyle(
+              color: Color(0xFFAFA5A0),
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const Spacer(),
+          SizedBox(
+            width: 128,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '支出：${moneyPlain(expenseTotal)}  收入：${moneyPlain(incomeTotal)}',
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: Color(0xFFAFA5A0),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CompactRecordItem extends StatelessWidget {
+  const CompactRecordItem({super.key, required this.record});
+
+  final AccountRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    final isIncome = record.type == RecordType.income;
+    final subtitle = record.note.trim().isEmpty ? null : record.note.trim();
+    return Dismissible(
+      key: ValueKey('compact-${record.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.only(right: 20),
+        alignment: Alignment.centerRight,
+        decoration: BoxDecoration(
+          color: _primaryColor,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: const Icon(Icons.delete_rounded, color: Colors.white),
+      ),
+      confirmDismiss: (_) async {
+        return confirmDeleteRecordIntent(context, record);
+      },
+      onDismissed: (_) async {
+        await AppScope.of(context).deleteRecord(record.id);
+        if (context.mounted) showToast(context, '已删除记录');
+      },
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => RecordDetailPage(recordId: record.id),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFEBD7A9)),
+                ),
+                child: Center(
+                  child: CategoryIconView(
+                    category: record.category,
+                    icon: record.icon,
+                    size: 24,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      record.category,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFAFA5A0),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 128,
+                child: Text(
+                  '${isIncome ? '+' : '-'} ${moneyPlain(record.amount)}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: isIncome ? _greenColor : _textColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class RecordItem extends StatelessWidget {
   const RecordItem({super.key, required this.record});
 
@@ -4769,9 +5197,12 @@ class RecordItem extends StatelessWidget {
         ),
         child: const Icon(Icons.delete_rounded, color: Colors.white),
       ),
-      onDismissed: (_) {
-        AppScope.of(context).deleteRecord(record.id);
-        showToast(context, '已删除记录');
+      confirmDismiss: (_) async {
+        return confirmDeleteRecordIntent(context, record);
+      },
+      onDismissed: (_) async {
+        await AppScope.of(context).deleteRecord(record.id);
+        if (context.mounted) showToast(context, '已删除记录');
       },
       child: InkWell(
         borderRadius: BorderRadius.circular(22),
@@ -4854,6 +5285,7 @@ class RecordDetailPage extends StatelessWidget {
           title: const Text('账单详情'),
           backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
+          centerTitle: true,
         ),
         body: const Center(child: Text('这笔记录已经不存在了')),
       );
@@ -4865,20 +5297,7 @@ class RecordDetailPage extends StatelessWidget {
         title: const Text('账单详情'),
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        actions: [
-          IconButton(
-            tooltip: '编辑',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => EditRecordPage(recordId: record.id),
-                ),
-              );
-            },
-            icon: const Icon(Icons.edit_rounded),
-          ),
-        ],
+        centerTitle: true,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -4941,9 +5360,30 @@ class RecordDetailPage extends StatelessWidget {
               width: double.infinity,
               height: 52,
               child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditRecordPage(recordId: record.id),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.edit_rounded),
+                label: const Text('编辑'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _primaryColor,
+                  side: const BorderSide(color: _primaryColor),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: OutlinedButton.icon(
                 onPressed: () => confirmDeleteRecord(context, store, record),
                 icon: const Icon(Icons.delete_rounded),
-                label: const Text('删除这笔记录'),
+                label: const Text('删除'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: _primaryColor,
                   side: const BorderSide(color: _primaryColor),
@@ -5010,6 +5450,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
           title: const Text('编辑账单'),
           backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
+          centerTitle: true,
         ),
         body: const Center(child: Text('这笔记录已经不存在了')),
       );
@@ -5025,6 +5466,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
         title: const Text('编辑账单'),
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
+        centerTitle: true,
       ),
       body: Column(
         children: [
@@ -5617,8 +6059,8 @@ List<AchievementBadgeData> achievementBadgesFor(AppStore store) {
   final expenseCategoryCount = store.expenseStats.length;
   final budgetGuardUnlocked =
       isMonthSettlementDay() &&
-      store.monthlyBudget > 0 &&
-      store.monthExpense <= store.monthlyBudget;
+      store.effectiveMonthlyBudget > 0 &&
+      store.monthExpense <= store.effectiveMonthlyBudget;
   return [
     AchievementBadgeData(
       id: 'first_record',
@@ -5778,17 +6220,20 @@ class AchievementPage extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 18, 8),
-                  child: Row(
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      IconButton(
-                        tooltip: '返回',
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(
-                          Icons.arrow_back_rounded,
-                          color: _textColor,
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: IconButton(
+                          tooltip: '返回',
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(
+                            Icons.arrow_back_rounded,
+                            color: _textColor,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 4),
                       const Text(
                         '成就徽章',
                         style: TextStyle(
@@ -6061,6 +6506,19 @@ Future<void> confirmDeleteRecord(
   AppStore store,
   AccountRecord record,
 ) async {
+  final confirm = await confirmDeleteRecordIntent(context, record);
+  if (confirm == true) {
+    await store.deleteRecord(record.id);
+    if (!context.mounted) return;
+    showToast(context, '已删除记录');
+    Navigator.pop(context);
+  }
+}
+
+Future<bool> confirmDeleteRecordIntent(
+  BuildContext context,
+  AccountRecord record,
+) async {
   final confirm = await showDialog<bool>(
     context: context,
     builder: (context) {
@@ -6080,19 +6538,15 @@ Future<void> confirmDeleteRecord(
       );
     },
   );
-  if (confirm == true) {
-    await store.deleteRecord(record.id);
-    if (!context.mounted) return;
-    showToast(context, '已删除记录');
-    Navigator.pop(context);
-  }
+  return confirm ?? false;
 }
 
 Future<void> confirmDeleteCategoryBudget(
   BuildContext context,
   AppStore store,
-  CategoryBudget budget,
-) async {
+  CategoryBudget budget, {
+  bool popAfterDelete = false,
+}) async {
   final confirm = await showDialog<bool>(
     context: context,
     builder: (context) {
@@ -6114,73 +6568,106 @@ Future<void> confirmDeleteCategoryBudget(
   );
   if (confirm == true) {
     await store.deleteCategoryBudget(budget.id);
-    if (context.mounted) showToast(context, '分类预算已删除');
+    if (!context.mounted) return;
+    showToast(context, '分类预算已删除');
+    if (popAfterDelete && Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
   }
 }
 
+OverlayEntry? _activeToastEntry;
+
 void showToast(BuildContext context, String message) {
-  final width = math.min(MediaQuery.sizeOf(context).width - 40, 360).toDouble();
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        width: width,
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-        padding: EdgeInsets.zero,
-        duration: const Duration(milliseconds: 1800),
-        content: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFFBF8),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: _primaryColor.withValues(alpha: 0.18)),
-            boxShadow: [
-              BoxShadow(
-                color: _textColor.withValues(alpha: 0.12),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: _primaryColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
+  final overlay = Overlay.of(context);
+  final size = MediaQuery.sizeOf(context);
+  final safeTop = MediaQuery.paddingOf(context).top;
+  final horizontalMargin = math.max(20.0, (size.width - 360) / 2);
+  _activeToastEntry?.remove();
+
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (context) {
+      return Positioned(
+        top: safeTop + 16,
+        left: horizontalMargin,
+        right: horizontalMargin,
+        child: IgnorePointer(
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBF8),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: _primaryColor.withValues(alpha: 0.18),
                 ),
-                child: const Center(child: CatPawMark(size: 16)),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  message,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _textColor,
-                    fontSize: 14,
-                    height: 1.25,
-                    fontWeight: FontWeight.w700,
+                boxShadow: [
+                  BoxShadow(
+                    color: _textColor.withValues(alpha: 0.12),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
                   ),
-                ),
+                ],
               ),
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: _primaryColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Center(child: CatPawMark(size: 16)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      message,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontSize: 14,
+                        height: 1.25,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-      ),
-    );
+      );
+    },
+  );
+
+  _activeToastEntry = entry;
+  overlay.insert(entry);
+  Future.delayed(const Duration(milliseconds: 1800), () {
+    if (_activeToastEntry == entry) {
+      entry.remove();
+      _activeToastEntry = null;
+    }
+  });
 }
 
 String money(double value) {
   final sign = value < 0 ? '-' : '';
   final absValue = value.abs();
   return '$sign¥${absValue.toStringAsFixed(2)}';
+}
+
+String moneyPlain(double value) {
+  final absValue = value.abs();
+  if (absValue == absValue.roundToDouble()) {
+    return absValue.toStringAsFixed(0);
+  }
+  return absValue.toStringAsFixed(2);
 }
 
 String moneyCompact(double value) {
