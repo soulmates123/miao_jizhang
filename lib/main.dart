@@ -699,8 +699,6 @@ Color categoryAccentColor(String category) {
       return const Color(0xFF8AC46D);
     case '数码':
       return const Color(0xFF5E8CFF);
-    case '保险':
-      return const Color(0xFF56B88E);
     case '还款':
       return const Color(0xFF6D89FF);
     case '公益':
