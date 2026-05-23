@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -79,7 +80,11 @@ class _MiaoJiZhangAppState extends State<MiaoJiZhangApp> {
           useMaterial3: true,
         ),
         builder: (context, child) {
-          return PageBackground(child: child ?? const SizedBox.shrink());
+          final mediaQuery = MediaQuery.of(context);
+          return MediaQuery(
+            data: mediaQuery.copyWith(textScaler: TextScaler.noScaling),
+            child: PageBackground(child: child ?? const SizedBox.shrink()),
+          );
         },
         home: const LoginPage(),
       ),
@@ -129,6 +134,10 @@ class AppStore extends ChangeNotifier {
 
   bool isLoaded = false;
   bool reminderEnabled = true;
+  int reminderHour = 22;
+  int reminderMinute = 0;
+  String reminderTitle = '喵记账';
+  String reminderMessage = '喵~今天你记账了吗？';
   double monthlyBudget = 0;
   String savingGoalName = '储蓄目标';
   double savingGoalTarget = 0;
@@ -155,6 +164,19 @@ class AppStore extends ChangeNotifier {
     savingGoalTarget = (data['savingGoalTarget'] as num?)?.toDouble() ?? 0;
     savingGoalSaved = (data['savingGoalSaved'] as num?)?.toDouble() ?? 0;
     reminderEnabled = data['reminderEnabled'] as bool? ?? true;
+    reminderHour = ((data['reminderHour'] as num?)?.toInt() ?? 22).clamp(0, 23);
+    reminderMinute = ((data['reminderMinute'] as num?)?.toInt() ?? 0).clamp(
+      0,
+      59,
+    );
+    reminderTitle =
+        (data['reminderTitle'] as String?)?.trim().isNotEmpty == true
+        ? (data['reminderTitle'] as String).trim()
+        : '喵记账';
+    reminderMessage =
+        (data['reminderMessage'] as String?)?.trim().isNotEmpty == true
+        ? (data['reminderMessage'] as String).trim()
+        : '喵~今天你记账了吗？';
     categoryBudgets
       ..clear()
       ..addAll(
@@ -256,6 +278,23 @@ class AppStore extends ChangeNotifier {
 
   Future<void> setReminder(bool value) async {
     reminderEnabled = value;
+    notifyListeners();
+    await _save();
+    await _syncReminderSchedule();
+  }
+
+  Future<void> updateReminderSettings({
+    required bool enabled,
+    required int hour,
+    required int minute,
+    required String title,
+    required String message,
+  }) async {
+    reminderEnabled = enabled;
+    reminderHour = hour.clamp(0, 23).toInt();
+    reminderMinute = minute.clamp(0, 59).toInt();
+    reminderTitle = title.trim().isEmpty ? '喵记账' : title.trim();
+    reminderMessage = message.trim().isEmpty ? '喵~今天你记账了吗？' : message.trim();
     notifyListeners();
     await _save();
     await _syncReminderSchedule();
@@ -427,13 +466,23 @@ class AppStore extends ChangeNotifier {
           .map((budget) => budget.toJson())
           .toList(),
       'reminderEnabled': reminderEnabled,
+      'reminderHour': reminderHour,
+      'reminderMinute': reminderMinute,
+      'reminderTitle': reminderTitle,
+      'reminderMessage': reminderMessage,
       'records': records.map((record) => record.toJson()).toList(),
     };
     await prefs.setString(_storageKey, jsonEncode(data));
   }
 
   Future<void> _syncReminderSchedule() {
-    return reminderService.setDailyReminderEnabled(reminderEnabled);
+    return reminderService.setDailyReminderEnabled(
+      reminderEnabled,
+      hour: reminderHour,
+      minute: reminderMinute,
+      title: reminderTitle,
+      body: reminderMessage,
+    );
   }
 
   void _resetToEmpty() {
@@ -442,6 +491,10 @@ class AppStore extends ChangeNotifier {
     savingGoalTarget = 0;
     savingGoalSaved = 0;
     reminderEnabled = true;
+    reminderHour = 22;
+    reminderMinute = 0;
+    reminderTitle = '喵记账';
+    reminderMessage = '喵~今天你记账了吗？';
     records.clear();
     categoryBudgets.clear();
   }
@@ -571,6 +624,30 @@ class TrendPoint {
   }
 }
 
+class HomeRecordFilter {
+  const HomeRecordFilter({required this.month, this.type, this.category});
+
+  final DateTime month;
+  final RecordType? type;
+  final String? category;
+
+  HomeRecordFilter copyWith({
+    DateTime? month,
+    Object? type = _filterNoChange,
+    Object? category = _filterNoChange,
+  }) {
+    return HomeRecordFilter(
+      month: month ?? this.month,
+      type: type == _filterNoChange ? this.type : type as RecordType?,
+      category: category == _filterNoChange
+          ? this.category
+          : category as String?,
+    );
+  }
+}
+
+const Object _filterNoChange = Object();
+
 class AmountInputFormatter extends TextInputFormatter {
   final RegExp _pattern = RegExp(r'^\d{0,9}(\.\d{0,2})?$');
 
@@ -611,9 +688,13 @@ const expenseCategories = [
   CategoryOption('服饰', Icons.checkroom_rounded),
   CategoryOption('家居', Icons.chair_rounded),
   CategoryOption('数码', Icons.devices_rounded),
-  CategoryOption('红包', Icons.redeem_rounded),
+  CategoryOption('红包', Icons.payments_rounded),
   CategoryOption('还款', Icons.credit_card_rounded),
   CategoryOption('公益', Icons.favorite_rounded),
+  CategoryOption('维修', Icons.build_circle_rounded),
+  CategoryOption('礼物', Icons.card_giftcard_rounded),
+  CategoryOption('住房', Icons.home_work_rounded),
+  CategoryOption('汽车', Icons.directions_car_rounded),
   CategoryOption('其他', Icons.more_horiz_rounded),
 ];
 
@@ -624,11 +705,15 @@ const incomeCategories = [
   CategoryOption('兼职', Icons.storefront_rounded),
   CategoryOption('奖金', Icons.emoji_events_rounded),
   CategoryOption('理财', Icons.trending_up_rounded),
-  CategoryOption('红包', Icons.redeem_rounded),
+  CategoryOption('红包', Icons.payments_rounded),
   CategoryOption('报销', Icons.receipt_long_rounded),
   CategoryOption('退款', Icons.assignment_return_rounded),
   CategoryOption('租金', Icons.apartment_rounded),
   CategoryOption('补贴', Icons.savings_rounded),
+  CategoryOption('借入', Icons.call_received_rounded),
+  CategoryOption('还款', Icons.credit_score_rounded),
+  CategoryOption('彩票', Icons.confirmation_number_rounded),
+  CategoryOption('麻将', Icons.casino_rounded),
   CategoryOption('其他', Icons.more_horiz_rounded),
 ];
 
@@ -644,7 +729,6 @@ IconData iconForCategory(RecordType type, String category) {
 }
 
 String normalizeCategoryName(String category) {
-  if (category == '住房') return '谷子';
   if (category == '育儿') return '水果';
   if (category == '人情') return '饮品';
   if (category == '保险') return '红包';
@@ -703,6 +787,14 @@ Color categoryAccentColor(String category) {
       return const Color(0xFF6D89FF);
     case '公益':
       return const Color(0xFFFF6E93);
+    case '维修':
+      return const Color(0xFF8E97A6);
+    case '礼物':
+      return const Color(0xFFFF75A5);
+    case '住房':
+      return const Color(0xFF9C7BFF);
+    case '汽车':
+      return const Color(0xFF4BA7FF);
     case '生活费':
       return const Color(0xFFFFA64D);
     case '卖闲置':
@@ -725,6 +817,12 @@ Color categoryAccentColor(String category) {
       return const Color(0xFFFF9960);
     case '补贴':
       return const Color(0xFFFFB340);
+    case '借入':
+      return const Color(0xFF6EA8FF);
+    case '彩票':
+      return const Color(0xFFFF8B55);
+    case '麻将':
+      return const Color(0xFF8B7CFF);
     default:
       return const Color(0xFFFF7F96);
   }
@@ -1294,21 +1392,14 @@ class _MainPageState extends State<MainPage> {
               backgroundColor: Colors.transparent,
               elevation: 0,
               surfaceTintColor: Colors.transparent,
-              centerTitle: false,
-              titleSpacing: 16,
-              title: Row(
-                children: [
-                  const CatFaceBadge(size: 34),
-                  const SizedBox(width: 8),
-                  Text(
-                    titles[currentIndex],
-                    style: const TextStyle(
-                      color: _textColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 24,
-                    ),
-                  ),
-                ],
+              centerTitle: true,
+              title: Text(
+                titles[currentIndex],
+                style: const TextStyle(
+                  color: _textColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 24,
+                ),
               ),
             ),
       body: AppScope.of(context).isLoaded
@@ -1389,15 +1480,24 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  DateTime selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  late HomeRecordFilter recordFilter = HomeRecordFilter(
+    month: DateTime(DateTime.now().year, DateTime.now().month),
+  );
 
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    final monthRecords = store.recordsForRange(
-      StatsRange.month,
-      anchorDate: selectedMonth,
-    );
+    final monthRecords = store
+        .recordsForRange(StatsRange.month, anchorDate: recordFilter.month)
+        .where((record) {
+          final typeMatches =
+              recordFilter.type == null || record.type == recordFilter.type;
+          final categoryMatches =
+              recordFilter.category == null ||
+              record.category == recordFilter.category;
+          return typeMatches && categoryMatches;
+        })
+        .toList();
     final todayRecords = store.recordsForRange(StatsRange.day);
     final todayExpense = todayRecords
         .where((record) => record.type == RecordType.expense)
@@ -1485,9 +1585,9 @@ class _HomePageState extends State<HomePage> {
               children: [
                 const SectionTitle(title: '账单记录'),
                 const Spacer(),
-                HomeMonthFilter(
-                  value: selectedMonth,
-                  onChanged: (value) => setState(() => selectedMonth = value),
+                HomeRecordFilterButton(
+                  filter: recordFilter,
+                  onChanged: (value) => setState(() => recordFilter = value),
                 ),
               ],
             ),
@@ -1495,8 +1595,8 @@ class _HomePageState extends State<HomePage> {
             if (monthRecords.isEmpty)
               EmptyState(
                 icon: Icons.receipt_long_rounded,
-                title: '${formatYearMonth(selectedMonth)}还没有记录',
-                subtitle: '去「记账」页添加这一月的收支吧',
+                title: '${formatYearMonth(recordFilter.month)}没有匹配记录',
+                subtitle: '调整筛选条件或去「记账」页添加收支吧',
               )
             else
               RecordGroupList(records: monthRecords),
@@ -1886,34 +1986,36 @@ class HomeTodayMetric extends StatelessWidget {
   }
 }
 
-class HomeMonthFilter extends StatelessWidget {
-  const HomeMonthFilter({
+class HomeRecordFilterButton extends StatelessWidget {
+  const HomeRecordFilterButton({
     super.key,
-    required this.value,
+    required this.filter,
     required this.onChanged,
   });
 
-  final DateTime value;
-  final ValueChanged<DateTime> onChanged;
+  final HomeRecordFilter filter;
+  final ValueChanged<HomeRecordFilter> onChanged;
 
-  Future<void> _pickMonth(BuildContext context) async {
-    final selected = await showModalBottomSheet<DateTime>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => MonthPickerSheet(value: value),
+  Future<void> _openFilter(BuildContext context) async {
+    final selected = await Navigator.push<HomeRecordFilter>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HomeRecordFilterPage(initialFilter: filter),
+      ),
     );
     if (selected == null) return;
-    onChanged(DateTime(selected.year, selected.month));
+    onChanged(selected);
   }
 
   @override
   Widget build(BuildContext context) {
+    final hasExtraFilter = !isDefaultHomeRecordFilter(filter);
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => _pickMonth(context),
+        onTap: () => _openFilter(context),
         child: Container(
           height: 36,
           padding: const EdgeInsets.only(left: 12, right: 8),
@@ -1925,27 +2027,428 @@ class HomeMonthFilter extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.calendar_month_rounded,
+              Icon(
+                Icons.tune_rounded,
                 size: 17,
-                color: _primaryColor,
+                color: hasExtraFilter ? _greenColor : _primaryColor,
               ),
               const SizedBox(width: 5),
               Text(
-                shortYearMonth(value),
-                style: const TextStyle(
-                  color: _textColor,
+                hasExtraFilter ? '筛选中' : '筛选',
+                style: TextStyle(
+                  color: hasExtraFilter ? _greenColor : _textColor,
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(width: 2),
               const Icon(
-                Icons.keyboard_arrow_down_rounded,
+                Icons.chevron_right_rounded,
                 size: 18,
                 color: _mutedColor,
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+bool isDefaultHomeRecordFilter(HomeRecordFilter filter) {
+  final now = DateTime.now();
+  return filter.month.year == now.year &&
+      filter.month.month == now.month &&
+      filter.type == null &&
+      filter.category == null;
+}
+
+class HomeRecordFilterPage extends StatefulWidget {
+  const HomeRecordFilterPage({super.key, required this.initialFilter});
+
+  final HomeRecordFilter initialFilter;
+
+  @override
+  State<HomeRecordFilterPage> createState() => _HomeRecordFilterPageState();
+}
+
+class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
+  late HomeRecordFilter filter = widget.initialFilter;
+
+  @override
+  Widget build(BuildContext context) {
+    final categories = filter.type == null
+        ? const <CategoryOption>[]
+        : filter.type == RecordType.expense
+        ? expenseCategories
+        : incomeCategories;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('筛选'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FilterCard(
+              child: Column(
+                children: [
+                  FilterActionRow(
+                    icon: Icons.calendar_month_rounded,
+                    title: '月份',
+                    value: formatYearMonth(filter.month),
+                    onTap: pickMonth,
+                  ),
+                  const Divider(height: 1, color: Color(0xFFFFE6DD)),
+                  FilterActionRow(
+                    icon: Icons.swap_horiz_rounded,
+                    title: '类型',
+                    value: filter.type == null
+                        ? '全部'
+                        : recordTypeLabel(filter.type!),
+                    onTap: () {},
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        FilterChipButton(
+                          label: '全部',
+                          selected: filter.type == null,
+                          onTap: () => setState(
+                            () => filter = filter.copyWith(
+                              type: null,
+                              category: null,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilterChipButton(
+                          label: '支出',
+                          selected: filter.type == RecordType.expense,
+                          onTap: () => setState(
+                            () => filter = filter.copyWith(
+                              type: RecordType.expense,
+                              category: null,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilterChipButton(
+                          label: '收入',
+                          selected: filter.type == RecordType.income,
+                          onTap: () => setState(
+                            () => filter = filter.copyWith(
+                              type: RecordType.income,
+                              category: null,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            const SectionTitle(title: '分类'),
+            const SizedBox(height: 12),
+            FilterCard(
+              child: filter.type == null
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 18),
+                      child: Center(
+                        child: Text(
+                          '选择支出或收入后，可以继续筛选分类',
+                          style: TextStyle(
+                            color: _mutedColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    )
+                  : GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: categories.length + 1,
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            mainAxisSpacing: 14,
+                            crossAxisSpacing: 14,
+                            childAspectRatio: 0.85,
+                          ),
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return FilterAllCategoryTile(
+                            selected: filter.category == null,
+                            onTap: () => setState(
+                              () => filter = filter.copyWith(category: null),
+                            ),
+                          );
+                        }
+                        final category = categories[index - 1];
+                        return CategoryTile(
+                          option: category,
+                          selected: filter.category == category.name,
+                          onTap: () => setState(
+                            () => filter = filter.copyWith(
+                              category: category.name,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7F3).withValues(alpha: 0.94),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.brown.withValues(alpha: 0.06),
+              blurRadius: 14,
+              offset: const Offset(0, -6),
+            ),
+          ],
+        ),
+        child: SizedBox(
+          height: 112,
+          child: Column(
+            children: [
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: OutlinedButton(
+                  onPressed: resetFilter,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _primaryColor,
+                    side: const BorderSide(color: _primaryColor),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  child: const Text('重置'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context, filter),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: const Text(
+                    '应用筛选',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> pickMonth() async {
+    final selected = await showModalBottomSheet<DateTime>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MonthPickerSheet(value: filter.month),
+    );
+    if (selected == null) return;
+    setState(() {
+      filter = filter.copyWith(month: DateTime(selected.year, selected.month));
+    });
+  }
+
+  void resetFilter() {
+    setState(() {
+      filter = HomeRecordFilter(
+        month: DateTime(DateTime.now().year, DateTime.now().month),
+      );
+    });
+  }
+}
+
+class FilterAllCategoryTile extends StatelessWidget {
+  const FilterAllCategoryTile({
+    super.key,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        decoration: BoxDecoration(
+          color: selected ? _primaryColor : Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: softShadow(),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: selected ? Colors.white : const Color(0xFFFFFCF5),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.82)
+                      : const Color(0xFFEAD9B8),
+                ),
+              ),
+              child: Icon(
+                Icons.apps_rounded,
+                color: selected ? _primaryColor : const Color(0xFFFF8F9F),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '全部分类',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: selected ? Colors.white : const Color(0xFF7B5147),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class FilterCard extends StatelessWidget {
+  const FilterCard({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: whiteCardDecoration(),
+      child: child,
+    );
+  }
+}
+
+class FilterActionRow extends StatelessWidget {
+  const FilterActionRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: trailing == null ? onTap : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon, color: _primaryColor),
+            const SizedBox(width: 12),
+            Text(
+              title,
+              style: const TextStyle(
+                color: _textColor,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Spacer(),
+            trailing ??
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      value,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: Color(0xFFB48A7C),
+                    ),
+                  ],
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class FilterChipButton extends StatelessWidget {
+  const FilterChipButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? _primaryColor : const Color(0xFFFFF0E8),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? _primaryColor : const Color(0xFFFFD6C9),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : _mutedColor,
+            fontWeight: FontWeight.bold,
           ),
         ),
       ),
@@ -1960,7 +2463,8 @@ class HomeCoverCard extends StatelessWidget {
   Widget build(BuildContext context) {
     const aspectRatio = 1920 / 820;
     final width = MediaQuery.sizeOf(context).width;
-    final height = width / aspectRatio - 12;
+    final safeTop = MediaQuery.paddingOf(context).top;
+    final height = width / aspectRatio - 12 + safeTop;
 
     return SizedBox(
       width: double.infinity,
@@ -1986,7 +2490,7 @@ class HomeCoverCard extends StatelessWidget {
             ),
             Positioned(
               left: 18,
-              top: 6,
+              top: safeTop + 6,
               child: Image.asset(
                 'assets/images/app_name.png',
                 width: 148,
@@ -1996,13 +2500,13 @@ class HomeCoverCard extends StatelessWidget {
             ),
             Positioned(
               left: 38,
-              bottom: 22,
+              bottom: 8,
               child: SpeechBubble(
                 child: const Text(
-                  '今天也要\n好好记账喵～',
+                  '今天也要\n好好记账喵~',
                   style: TextStyle(
                     color: _textColor,
-                    fontSize: 16,
+                    fontSize: 15,
                     height: 1.35,
                     fontWeight: FontWeight.w800,
                   ),
@@ -3227,6 +3731,7 @@ class ExpenseOverviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final typeLabel = recordTypeLabel(type);
+    final hasDominantStat = stats.any((stat) => stat.ratio >= 0.5);
     return ReportCard(
       title: '$typeLabel占比概况',
       child: stats.isEmpty
@@ -3238,43 +3743,46 @@ class ExpenseOverviewCard extends StatelessWidget {
           : Column(
               children: [
                 SizedBox(
-                  width: 160,
-                  height: 160,
-                  child: CustomPaint(
-                    painter: DonutPainter(stats),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '总$typeLabel',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: _mutedColor,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              money(total),
+                  width: double.infinity,
+                  height: 300,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: CustomPaint(painter: DonutPainter(stats)),
+                      ),
+                      Align(
+                        alignment: Alignment(hasDominantStat ? -0.12 : 0, 0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '总$typeLabel',
                               textAlign: TextAlign.center,
                               style: const TextStyle(
-                                color: _textColor,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w900,
+                                color: _mutedColor,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 4),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                money(total),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: _textColor,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 14),
-                ...stats.map((stat) => PercentRow(stat: stat, total: total)),
               ],
             ),
     );
@@ -3307,7 +3815,7 @@ class CategoryRankingCard extends StatelessWidget {
                       icon: stat.icon,
                       title: stat.name,
                       subtitle: '$typeLabel ${money(stat.amount)}',
-                      trailing: '${(stat.ratio * 100).round()}%',
+                      trailing: '${(stat.ratio * 100).toStringAsFixed(1)}%',
                       ratio: stat.ratio,
                     ),
                   )
@@ -3350,25 +3858,30 @@ class DetailRankingCard extends StatelessWidget {
                               record.category,
                               style: const TextStyle(
                                 color: _textColor,
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               formatMonthDay(record.date),
-                              style: const TextStyle(color: _mutedColor),
+                              style: const TextStyle(
+                                color: _mutedColor,
+                                fontSize: 14,
+                              ),
                             ),
                           ],
                         ),
                       ),
                       Text(
-                        '${type == RecordType.expense ? '-' : '+'}${money(record.amount)}',
+                        '${type == RecordType.expense ? '-' : '+'} ${money(record.amount)}',
                         style: TextStyle(
                           color: type == RecordType.expense
                               ? _textColor
                               : _greenColor,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          height: 1.2,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ],
@@ -3554,7 +4067,15 @@ class RankingBarRow extends StatelessWidget {
                         ),
                       ),
                     ),
-                    Text(trailing, style: const TextStyle(color: _mutedColor)),
+                    Text(
+                      trailing,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontSize: 15,
+                        height: 1.2,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -3661,18 +4182,35 @@ class DonutPainter extends CustomPainter {
 
   final List<CategoryStat> stats;
   final colors = const [
-    _primaryColor,
-    _accentColor,
-    Color(0xFF8FD8B8),
-    Color(0xFFB8A7FF),
     Color(0xFFFFA76B),
+    Color(0xFF8CB9F2),
+    Color(0xFFFFD36E),
+    Color(0xFF75E6C8),
+    Color(0xFFEA76D1),
+    Color(0xFFB8A7FF),
     Color(0xFF78C6E7),
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final stroke = size.width * 0.14;
+    final labeledStats = stats
+        .where((stat) => stat.amount > 0)
+        .take(3)
+        .toList();
+    final hasDominantStat = stats.any((stat) => stat.ratio >= 0.5);
+    final diameter = hasDominantStat
+        ? math.min(size.width * 0.54, size.height * 0.7)
+        : math.min(size.width * 0.6, size.height * 0.78);
+    final center = Offset(
+      hasDominantStat ? size.width * 0.43 : size.width / 2,
+      size.height / 2,
+    );
+    final rect = Rect.fromCenter(
+      center: center,
+      width: diameter,
+      height: diameter,
+    );
+    final stroke = diameter * 0.18;
     final arcRect = rect.deflate(stroke / 2);
     final paint = Paint()
       ..style = PaintingStyle.stroke
@@ -3689,15 +4227,104 @@ class DonutPainter extends CustomPainter {
     }
 
     var start = -math.pi / 2;
-    const gap = 0.018;
+    const gap = 0.026;
+    final labelPainter = TextPainter(textDirection: TextDirection.ltr);
     for (var i = 0; i < stats.length; i++) {
       final sweep = math.pi * 2 * stats[i].ratio;
       if (sweep <= 0) continue;
       paint.color = colors[i % colors.length];
       final visibleSweep = math.max(0.0, sweep - gap);
       canvas.drawArc(arcRect, start + gap / 2, visibleSweep, false, paint);
+      final labelIndex = labeledStats.indexOf(stats[i]);
+      if (labelIndex >= 0) {
+        final labelAngle = labelIndex == 0 && stats[i].ratio >= 0.5
+            ? 0.0
+            : start + sweep / 2;
+        _drawOutsideLabel(
+          canvas,
+          size,
+          arcRect,
+          labelAngle,
+          stats[i],
+          colors[i % colors.length],
+          labelPainter,
+          labelIndex,
+        );
+      }
       start += sweep;
     }
+  }
+
+  void _drawOutsideLabel(
+    Canvas canvas,
+    Size size,
+    Rect arcRect,
+    double angle,
+    CategoryStat stat,
+    Color color,
+    TextPainter textPainter,
+    int labelIndex,
+  ) {
+    final radius = arcRect.width / 2;
+    final center = arcRect.center;
+    final direction = Offset(math.cos(angle), math.sin(angle));
+    final startPoint = center + direction * radius;
+    final isRight = labelIndex == 0 ? true : direction.dx >= 0;
+    final naturalY = (center + direction * (radius + 18)).dy;
+    final preferredY = switch (labelIndex) {
+      0 => center.dy - radius * 0.18,
+      1 => naturalY + 46,
+      _ => naturalY + 8,
+    };
+    final elbowPoint = Offset(
+      isRight ? center.dx + radius + 16 : center.dx - radius - 16,
+      preferredY.clamp(30.0, size.height - 44.0),
+    );
+
+    final textAlign = isRight ? TextAlign.right : TextAlign.left;
+    textPainter
+      ..textAlign = textAlign
+      ..text = TextSpan(
+        children: [
+          TextSpan(
+            text: '${stat.name}\n',
+            style: const TextStyle(
+              color: Color(0xFFAFA5A0),
+              fontSize: 14,
+              height: 1.2,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          TextSpan(
+            text: '${(stat.ratio * 100).toStringAsFixed(1)}%',
+            style: const TextStyle(
+              color: _textColor,
+              fontSize: 15,
+              height: 1.2,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      );
+    textPainter.layout(maxWidth: 62);
+    final labelX = isRight ? size.width - 12 - textPainter.width : 12.0;
+    final labelY = (elbowPoint.dy - textPainter.height / 2).clamp(
+      6.0,
+      size.height - textPainter.height - 6.0,
+    );
+    final lineY = labelY + textPainter.height / 2;
+    final endX = isRight ? labelX - 6 : labelX + textPainter.width + 6;
+    final endPoint = Offset(endX, lineY);
+    final linePaint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+    final path = Path()
+      ..moveTo(startPoint.dx, startPoint.dy)
+      ..lineTo(elbowPoint.dx, lineY)
+      ..lineTo(endPoint.dx, lineY);
+    canvas.drawPath(path, linePaint);
+    textPainter.paint(canvas, Offset(labelX, labelY));
   }
 
   @override
@@ -4519,11 +5146,15 @@ class MinePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
-          MineSwitchTile(
+          MineTile(
             icon: Icons.notifications_rounded,
             title: '记账提醒',
-            value: store.reminderEnabled,
-            onChanged: store.setReminder,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ReminderSettingsPage()),
+              );
+            },
           ),
           MineTile(
             icon: Icons.emoji_events_rounded,
@@ -4546,6 +5177,482 @@ class MinePage extends StatelessWidget {
             danger: true,
             onTap: () => confirmClearData(context, store),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class ReminderSettingsPage extends StatefulWidget {
+  const ReminderSettingsPage({super.key});
+
+  @override
+  State<ReminderSettingsPage> createState() => _ReminderSettingsPageState();
+}
+
+class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
+  late bool enabled;
+  late TimeOfDay reminderTime;
+  late TextEditingController titleController;
+  late TextEditingController messageController;
+  bool initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    titleController = TextEditingController();
+    messageController = TextEditingController();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (initialized) return;
+    final store = AppScope.of(context);
+    enabled = store.reminderEnabled;
+    reminderTime = TimeOfDay(
+      hour: store.reminderHour,
+      minute: store.reminderMinute,
+    );
+    titleController.text = store.reminderTitle;
+    messageController.text = store.reminderMessage;
+    initialized = true;
+  }
+
+  @override
+  void dispose() {
+    titleController.dispose();
+    messageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final timeLabel =
+        '${twoDigits(reminderTime.hour)}:${twoDigits(reminderTime.minute)}';
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('记账提醒'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.88),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: _primaryColor.withValues(alpha: 0.28),
+                    width: 1.2,
+                  ),
+                  boxShadow: softShadow(),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '记账提醒',
+                            style: TextStyle(
+                              color: _textColor,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: enabled,
+                          activeThumbColor: Colors.white,
+                          activeTrackColor: _primaryColor,
+                          inactiveThumbColor: Colors.white,
+                          inactiveTrackColor: const Color(0xFFFFC5D0),
+                          onChanged: (value) => setState(() => enabled = value),
+                        ),
+                      ],
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: DashedDivider(),
+                    ),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: pickReminderTime,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                '提醒时间',
+                                style: TextStyle(
+                                  color: _textColor,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '每天 $timeLabel',
+                              style: const TextStyle(
+                                color: _textColor,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.chevron_right_rounded,
+                              color: Color(0xFFB48A7C),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFEFF3),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: _primaryColor.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.asset(
+                                  'assets/images/app_icon.png',
+                                  width: 42,
+                                  height: 42,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  '喵记账提醒',
+                                  style: TextStyle(
+                                    color: _textColor,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              const CatPawMark(size: 22),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          reminderInputRow(
+                            label: '标题',
+                            controller: titleController,
+                            hintText: '主人，今天记账了吗~',
+                            maxLength: 16,
+                          ),
+                          const SizedBox(height: 10),
+                          reminderInputRow(
+                            label: '内容',
+                            controller: messageController,
+                            hintText: '喵~今天你记账了吗？',
+                            maxLength: 28,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF7F3).withValues(alpha: 0.94),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.brown.withValues(alpha: 0.06),
+                  blurRadius: 14,
+                  offset: const Offset(0, -6),
+                ),
+              ],
+            ),
+            child: SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: FilledButton(
+                onPressed: saveSettings,
+                style: FilledButton.styleFrom(
+                  backgroundColor: _primaryColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                child: const Text('保存提醒'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget reminderInputRow({
+    required String label,
+    required TextEditingController controller,
+    required String hintText,
+    required int maxLength,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 44,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: _textColor,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFFFD6C9)),
+            ),
+            alignment: Alignment.center,
+            child: TextField(
+              controller: controller,
+              maxLength: maxLength,
+              decoration: InputDecoration(
+                hintText: hintText,
+                counterText: '',
+                border: InputBorder.none,
+                isDense: true,
+              ),
+              style: const TextStyle(
+                color: _textColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> pickReminderTime() async {
+    var selectedHour = reminderTime.hour;
+    var selectedMinute = reminderTime.minute;
+    final picked = await showModalBottomSheet<TimeOfDay>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Container(
+              height: 328,
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFFBF8),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _primaryColor.withValues(alpha: 0.26),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        child: const Text(
+                          '取消',
+                          style: TextStyle(color: _mutedColor),
+                        ),
+                      ),
+                      const Expanded(
+                        child: Center(
+                          child: Text(
+                            '提醒时间',
+                            style: TextStyle(
+                              color: _textColor,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(
+                          sheetContext,
+                          TimeOfDay(hour: selectedHour, minute: selectedMinute),
+                        ),
+                        child: const Text(
+                          '确定',
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF3F5),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: CupertinoPicker.builder(
+                              scrollController: FixedExtentScrollController(
+                                initialItem: selectedHour,
+                              ),
+                              itemExtent: 42,
+                              selectionOverlay:
+                                  const CupertinoPickerDefaultSelectionOverlay(
+                                    background: Color(0x55FFFFFF),
+                                  ),
+                              onSelectedItemChanged: (index) {
+                                setSheetState(() => selectedHour = index);
+                              },
+                              childCount: 24,
+                              itemBuilder: (context, index) => Center(
+                                child: Text(
+                                  twoDigits(index),
+                                  style: const TextStyle(
+                                    color: _textColor,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const Text(
+                            ':',
+                            style: TextStyle(
+                              color: _mutedColor,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Expanded(
+                            child: CupertinoPicker.builder(
+                              scrollController: FixedExtentScrollController(
+                                initialItem: selectedMinute,
+                              ),
+                              itemExtent: 42,
+                              selectionOverlay:
+                                  const CupertinoPickerDefaultSelectionOverlay(
+                                    background: Color(0x55FFFFFF),
+                                  ),
+                              onSelectedItemChanged: (index) {
+                                setSheetState(() => selectedMinute = index);
+                              },
+                              childCount: 60,
+                              itemBuilder: (context, index) => Center(
+                                child: Text(
+                                  twoDigits(index),
+                                  style: const TextStyle(
+                                    color: _textColor,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (picked == null) return;
+    setState(() => reminderTime = picked);
+  }
+
+  Future<void> saveSettings() async {
+    final store = AppScope.of(context);
+    await store.updateReminderSettings(
+      enabled: enabled,
+      hour: reminderTime.hour,
+      minute: reminderTime.minute,
+      title: titleController.text,
+      message: messageController.text,
+    );
+    if (!mounted) return;
+    showToast(context, '提醒设置已保存');
+    Navigator.pop(context);
+  }
+}
+
+class ReminderSettingRow extends StatelessWidget {
+  const ReminderSettingRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        children: [
+          Icon(icon, color: _primaryColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: _textColor,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          trailing,
         ],
       ),
     );
@@ -4791,9 +5898,9 @@ class _TodayOverviewDetailPageState extends State<TodayOverviewDetailPage> {
                         MediaQuery.sizeOf(context).height - 360,
                       ),
                       title: selectedType == RecordType.expense
-                          ? '今天还没有支出'
-                          : '今天还没有收入',
-                      subtitle: '去「记账」页添加后，这里会自动显示',
+                          ? '喵~今天还没有任何支出哟'
+                          : '喵~今天还没有任何收入哟',
+                      subtitle: '去「记账」页添加账单后，这里会自动同步显示',
                     )
                   else
                     RecordGroupList(records: selectedRecords),
@@ -4836,7 +5943,8 @@ class TodayDetailSummaryCard extends StatelessWidget {
                 child: HomeTodayMetric(
                   title: '支出',
                   value: money(expense),
-                  valueColor: _primaryColor,
+                  valueColor: _textColor,
+                  backgroundColor: const Color(0xFFFFBFC9),
                 ),
               ),
               const SizedBox(width: 8),
@@ -4844,7 +5952,8 @@ class TodayDetailSummaryCard extends StatelessWidget {
                 child: HomeTodayMetric(
                   title: '收入',
                   value: money(income),
-                  valueColor: _greenColor,
+                  valueColor: _textColor,
+                  backgroundColor: const Color(0xFFFFE2AE),
                 ),
               ),
               const SizedBox(width: 8),
@@ -4853,6 +5962,7 @@ class TodayDetailSummaryCard extends StatelessWidget {
                   title: '结余',
                   value: money(balance),
                   valueColor: balance >= 0 ? _greenColor : _primaryColor,
+                  backgroundColor: const Color(0xFFD8EFCF),
                 ),
               ),
             ],
@@ -5008,6 +6118,10 @@ class RecordDateHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final summaries = [
+      if (expenseTotal > 0) '支出：${money(expenseTotal)}',
+      if (incomeTotal > 0) '收入：${money(incomeTotal)}',
+    ].join('  ');
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
       child: Row(
@@ -5038,23 +6152,17 @@ class RecordDateHeader extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const Spacer(),
-          SizedBox(
-            width: 128,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Text(
-                  '支出：${moneyPlain(expenseTotal)}  收入：${moneyPlain(incomeTotal)}',
-                  maxLines: 1,
-                  style: const TextStyle(
-                    color: Color(0xFFAFA5A0),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              summaries,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Color(0xFFAFA5A0),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
@@ -5157,7 +6265,7 @@ class CompactRecordItem extends StatelessWidget {
               SizedBox(
                 width: 128,
                 child: Text(
-                  '${isIncome ? '+' : '-'} ${moneyPlain(record.amount)}',
+                  '${isIncome ? '+' : '-'} ${money(record.amount)}',
                   textAlign: TextAlign.right,
                   style: TextStyle(
                     color: isIncome ? _greenColor : _textColor,
@@ -5252,7 +6360,7 @@ class RecordItem extends StatelessWidget {
                 ),
               ),
               Text(
-                '${isIncome ? '+' : '-'}${money(record.amount)}',
+                '${isIncome ? '+' : '-'} ${money(record.amount)}',
                 style: TextStyle(
                   color: isIncome ? _greenColor : _primaryColor,
                   fontWeight: FontWeight.bold,
@@ -5327,7 +6435,7 @@ class RecordDetailPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '${isIncome ? '+' : '-'}${money(record.amount)}',
+                    '${isIncome ? '+' : '-'} ${money(record.amount)}',
                     style: TextStyle(
                       color: isIncome ? _greenColor : _primaryColor,
                       fontSize: 36,
@@ -5699,7 +6807,7 @@ class PercentRow extends StatelessWidget {
             ),
           ),
           Text(
-            '${(stat.ratio * 100).round()}%',
+            '${(stat.ratio * 100).toStringAsFixed(1)}%',
             style: const TextStyle(color: _mutedColor),
           ),
           const SizedBox(width: 18),
@@ -5777,40 +6885,65 @@ class MineSwitchTile extends StatelessWidget {
     super.key,
     required this.icon,
     required this.title,
+    this.subtitle,
     required this.value,
     required this.onChanged,
+    this.onTap,
   });
 
   final IconData icon;
   final String title;
+  final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
-      decoration: whiteCardDecoration(),
-      child: Row(
-        children: [
-          Icon(icon, color: _primaryColor),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: _textColor,
-                fontWeight: FontWeight.bold,
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+        decoration: whiteCardDecoration(),
+        child: Row(
+          children: [
+            Icon(icon, color: _primaryColor),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle!,
+                      style: const TextStyle(
+                        color: _mutedColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-          ),
-          Switch(
-            value: value,
-            activeThumbColor: _primaryColor,
-            onChanged: onChanged,
-          ),
-        ],
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFFB48A7C)),
+            Switch(
+              value: value,
+              activeThumbColor: _primaryColor,
+              onChanged: onChanged,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -6807,6 +7940,8 @@ String formatDate(DateTime date) {
 String formatTime(DateTime date) {
   return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 }
+
+String twoDigits(int value) => value.toString().padLeft(2, '0');
 
 String formatMonthDay(DateTime date) {
   return '${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}';

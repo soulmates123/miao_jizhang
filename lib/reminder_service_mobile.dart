@@ -52,14 +52,27 @@ class ReminderService {
     _initialized = true;
   }
 
-  Future<void> setDailyReminderEnabled(bool enabled) async {
+  Future<void> setDailyReminderEnabled(
+    bool enabled, {
+    int hour = 22,
+    int minute = 0,
+    String? title,
+    String? body,
+  }) async {
     await initialize();
     if (!_isSupportedMobilePlatform) return;
 
     await cancelDailyReminder();
     if (!enabled) return;
 
-    await _scheduleDailyReminder();
+    await _scheduleDailyReminder(
+      hour: hour,
+      minute: minute,
+      title: title?.trim().isNotEmpty == true
+          ? title!.trim()
+          : _notificationTitle,
+      body: body?.trim().isNotEmpty == true ? body!.trim() : _notificationBody,
+    );
   }
 
   Future<void> cancelDailyReminder() async {
@@ -69,11 +82,16 @@ class ReminderService {
     await _notifications.cancel(id: _dailyReminderId);
   }
 
-  Future<void> _scheduleDailyReminder() async {
+  Future<void> _scheduleDailyReminder({
+    required int hour,
+    required int minute,
+    required String title,
+    required String body,
+  }) async {
     final permissionGranted = await _requestNotificationPermission();
     if (!permissionGranted) return;
 
-    final scheduledTime = _nextTenPm();
+    final scheduledTime = _nextDailyTime(hour: hour, minute: minute);
     final details = const NotificationDetails(
       android: AndroidNotificationDetails(
         _channelId,
@@ -82,17 +100,14 @@ class ReminderService {
         importance: Importance.high,
         priority: Priority.high,
       ),
-      iOS: DarwinNotificationDetails(
-        presentAlert: true,
-        presentSound: true,
-      ),
+      iOS: DarwinNotificationDetails(presentAlert: true, presentSound: true),
     );
 
     try {
       await _notifications.zonedSchedule(
         id: _dailyReminderId,
-        title: _notificationTitle,
-        body: _notificationBody,
+        title: title,
+        body: body,
         scheduledDate: scheduledTime,
         notificationDetails: details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -102,8 +117,8 @@ class ReminderService {
     } on PlatformException {
       await _notifications.zonedSchedule(
         id: _dailyReminderId,
-        title: _notificationTitle,
-        body: _notificationBody,
+        title: title,
+        body: body,
         scheduledDate: scheduledTime,
         notificationDetails: details,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
@@ -160,14 +175,17 @@ class ReminderService {
     }
   }
 
-  tz.TZDateTime _nextTenPm() {
+  tz.TZDateTime _nextDailyTime({required int hour, required int minute}) {
     final now = tz.TZDateTime.now(tz.local);
+    final safeHour = hour.clamp(0, 23).toInt();
+    final safeMinute = minute.clamp(0, 59).toInt();
     var scheduled = tz.TZDateTime(
       tz.local,
       now.year,
       now.month,
       now.day,
-      22,
+      safeHour,
+      safeMinute,
     );
     if (!scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
