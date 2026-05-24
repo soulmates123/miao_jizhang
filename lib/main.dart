@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reminder_service.dart';
@@ -509,6 +510,7 @@ class AccountRecord {
     required this.amount,
     required this.note,
     required this.date,
+    this.photoDataUris = const [],
   });
 
   final String id;
@@ -518,6 +520,7 @@ class AccountRecord {
   final double amount;
   final String note;
   final DateTime date;
+  final List<String> photoDataUris;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -526,6 +529,7 @@ class AccountRecord {
     'amount': amount,
     'note': note,
     'date': date.toIso8601String(),
+    'photoDataUris': photoDataUris,
   };
 
   factory AccountRecord.fromJson(Map<String, dynamic> json) {
@@ -541,6 +545,11 @@ class AccountRecord {
       amount: (json['amount'] as num?)?.toDouble() ?? 0,
       note: json['note'] as String? ?? '',
       date: DateTime.tryParse(json['date'] as String? ?? '') ?? DateTime.now(),
+      photoDataUris:
+          (json['photoDataUris'] as List<dynamic>?)
+              ?.whereType<String>()
+              .toList() ??
+          const [],
     );
   }
 }
@@ -2077,11 +2086,22 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppScope.of(context);
+    final categoryNames = filter.type == null
+        ? const <String>{}
+        : store
+              .recordsForRange(StatsRange.month, anchorDate: filter.month)
+              .where((record) => record.type == filter.type)
+              .map((record) => record.category)
+              .toSet();
+    final categorySource = filter.type == RecordType.income
+        ? incomeCategories
+        : expenseCategories;
     final categories = filter.type == null
         ? const <CategoryOption>[]
-        : filter.type == RecordType.expense
-        ? expenseCategories
-        : incomeCategories;
+        : categorySource
+              .where((category) => categoryNames.contains(category.name))
+              .toList();
     return Scaffold(
       appBar: AppBar(
         title: const Text('筛选'),
@@ -2089,7 +2109,7 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
         surfaceTintColor: Colors.transparent,
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2114,17 +2134,6 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        FilterChipButton(
-                          label: '全部',
-                          selected: filter.type == null,
-                          onTap: () => setState(
-                            () => filter = filter.copyWith(
-                              type: null,
-                              category: null,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
                         FilterChipButton(
                           label: '支出',
                           selected: filter.type == RecordType.expense,
@@ -2155,11 +2164,10 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
             const SizedBox(height: 18),
             const SectionTitle(title: '分类'),
             const SizedBox(height: 12),
-            FilterCard(
-              child: filter.type == null
-                  ? const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 18),
-                      child: Center(
+            Expanded(
+              child: FilterCard(
+                child: filter.type == null
+                    ? const Center(
                         child: Text(
                           '选择支出或收入后，可以继续筛选分类',
                           style: TextStyle(
@@ -2167,40 +2175,48 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ),
-                    )
-                  : GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: categories.length + 1,
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
-                            mainAxisSpacing: 14,
-                            crossAxisSpacing: 14,
-                            childAspectRatio: 0.85,
+                      )
+                    : categories.isEmpty
+                    ? Center(
+                        child: Text(
+                          '${formatYearMonth(filter.month)}没有${recordTypeLabel(filter.type!)}记录',
+                          style: const TextStyle(
+                            color: _mutedColor,
+                            fontWeight: FontWeight.w600,
                           ),
-                      itemBuilder: (context, index) {
-                        if (index == 0) {
-                          return FilterAllCategoryTile(
-                            selected: filter.category == null,
+                        ),
+                      )
+                    : GridView.builder(
+                        itemCount: categories.length + 1,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 4,
+                              mainAxisSpacing: 14,
+                              crossAxisSpacing: 14,
+                              childAspectRatio: 0.85,
+                            ),
+                        itemBuilder: (context, index) {
+                          if (index == 0) {
+                            return FilterAllCategoryTile(
+                              selected: filter.category == null,
+                              onTap: () => setState(
+                                () => filter = filter.copyWith(category: null),
+                              ),
+                            );
+                          }
+                          final category = categories[index - 1];
+                          return CategoryTile(
+                            option: category,
+                            selected: filter.category == category.name,
                             onTap: () => setState(
-                              () => filter = filter.copyWith(category: null),
+                              () => filter = filter.copyWith(
+                                category: category.name,
+                              ),
                             ),
                           );
-                        }
-                        final category = categories[index - 1];
-                        return CategoryTile(
-                          option: category,
-                          selected: filter.category == category.name,
-                          onTap: () => setState(
-                            () => filter = filter.copyWith(
-                              category: category.name,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                        },
+                      ),
+              ),
             ),
           ],
         ),
@@ -2232,26 +2248,32 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                    textStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   child: const Text('重置'),
                 ),
               ),
               const SizedBox(height: 12),
-              Expanded(
-                child: FilledButton(
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: OutlinedButton(
                   onPressed: () => Navigator.pop(context, filter),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _primaryColor,
-                    foregroundColor: Colors.white,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _primaryColor,
+                    side: const BorderSide(color: _primaryColor),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
                     ),
+                    textStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  child: const Text(
-                    '应用筛选',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                  ),
+                  child: const Text('应用筛选'),
                 ),
               ),
             ],
@@ -2269,7 +2291,10 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
     );
     if (selected == null) return;
     setState(() {
-      filter = filter.copyWith(month: DateTime(selected.year, selected.month));
+      filter = filter.copyWith(
+        month: DateTime(selected.year, selected.month),
+        category: null,
+      );
     });
   }
 
@@ -2798,6 +2823,7 @@ class AddRecordPage extends StatefulWidget {
 class _AddRecordPageState extends State<AddRecordPage> {
   final amountController = TextEditingController();
   final noteController = TextEditingController();
+  final List<String> photoDataUris = [];
   RecordType type = RecordType.expense;
   int selectedCategoryIndex = 0;
   DateTime selectedDate = DateTime.now();
@@ -2864,8 +2890,11 @@ class _AddRecordPageState extends State<AddRecordPage> {
         ),
         RecordBottomPanel(
           noteController: noteController,
+          photoDataUris: photoDataUris,
           selectedDate: selectedDate,
           onPickDate: _pickDate,
+          onAddPhoto: _addPhotos,
+          onRemovePhoto: _removePhoto,
           onSave: () => _saveRecord(selectedCategory),
           buttonText: '保存记录',
         ),
@@ -2919,10 +2948,12 @@ class _AddRecordPageState extends State<AddRecordPage> {
         amount: amount,
         note: noteController.text.trim(),
         date: selectedDate,
+        photoDataUris: List.unmodifiable(photoDataUris),
       ),
     );
     amountController.clear();
     noteController.clear();
+    photoDataUris.clear();
     selectedDate = DateTime.now();
     selectedCategoryIndex = 0;
     if (!mounted) return;
@@ -2933,6 +2964,19 @@ class _AddRecordPageState extends State<AddRecordPage> {
       fallbackMessage: '喵~又有一笔新的记账！',
     );
     widget.onSaved();
+  }
+
+  Future<void> _addPhotos() async {
+    final pickedPhotos = await pickRecordPhotos(
+      context,
+      currentCount: photoDataUris.length,
+    );
+    if (pickedPhotos.isEmpty || !mounted) return;
+    setState(() => photoDataUris.addAll(pickedPhotos));
+  }
+
+  void _removePhoto(int index) {
+    setState(() => photoDataUris.removeAt(index));
   }
 }
 
@@ -3036,15 +3080,21 @@ class RecordBottomPanel extends StatelessWidget {
   const RecordBottomPanel({
     super.key,
     required this.noteController,
+    required this.photoDataUris,
     required this.selectedDate,
     required this.onPickDate,
+    required this.onAddPhoto,
+    required this.onRemovePhoto,
     required this.onSave,
     required this.buttonText,
   });
 
   final TextEditingController noteController;
+  final List<String> photoDataUris;
   final DateTime selectedDate;
   final VoidCallback onPickDate;
+  final VoidCallback onAddPhoto;
+  final ValueChanged<int> onRemovePhoto;
   final VoidCallback onSave;
   final String buttonText;
 
@@ -3100,9 +3150,24 @@ class RecordBottomPanel extends StatelessWidget {
                       ),
                     ),
                   ),
+                  IconButton(
+                    tooltip: '添加照片',
+                    onPressed: onAddPhoto,
+                    icon: const Icon(
+                      Icons.add_a_photo_rounded,
+                      color: _primaryColor,
+                    ),
+                  ),
                 ],
               ),
             ),
+            if (photoDataUris.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              RecordPhotoStrip(
+                photoDataUris: photoDataUris,
+                onRemove: onRemovePhoto,
+              ),
+            ],
             const SizedBox(height: 6),
             SizedBox(
               width: double.infinity,
@@ -3110,6 +3175,79 @@ class RecordBottomPanel extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class RecordPhotoStrip extends StatelessWidget {
+  const RecordPhotoStrip({
+    super.key,
+    required this.photoDataUris,
+    required this.onRemove,
+  });
+
+  final List<String> photoDataUris;
+  final ValueChanged<int> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 72,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: photoDataUris.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.memory(
+                  imageBytesFromDataUri(photoDataUris[index]),
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(
+                    width: 72,
+                    height: 72,
+                    color: _softColor,
+                    child: const Icon(
+                      Icons.broken_image_rounded,
+                      color: _mutedColor,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: -7,
+                top: -7,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () => onRemove(index),
+                  child: Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: _primaryColor.withValues(alpha: 0.34),
+                      ),
+                      boxShadow: softShadow(),
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      color: _primaryColor,
+                      size: 16,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -3925,15 +4063,6 @@ class ReportCard extends StatelessWidget {
               ),
               const SizedBox(width: 7),
               const CatPawMark(size: 15, color: _accentColor),
-              const Spacer(),
-              Container(
-                width: 34,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: _primaryColor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -6348,7 +6477,7 @@ class RecordItem extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${record.note.isEmpty ? '无备注' : record.note} · ${formatRecordDate(record.date)}',
+                      recordListSubtitle(record),
                       style: const TextStyle(
                         color: Color(0xFFB48A7C),
                         fontSize: 12,
@@ -6461,6 +6590,10 @@ class RecordDetailPage extends StatelessWidget {
               title: '备注',
               value: record.note.isEmpty ? '无备注' : record.note,
             ),
+            if (record.photoDataUris.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              DetailPhotoCard(photoDataUris: record.photoDataUris),
+            ],
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
@@ -6515,6 +6648,7 @@ class EditRecordPage extends StatefulWidget {
 class _EditRecordPageState extends State<EditRecordPage> {
   final amountController = TextEditingController();
   final noteController = TextEditingController();
+  final List<String> photoDataUris = [];
   RecordType type = RecordType.expense;
   int selectedCategoryIndex = 0;
   DateTime selectedDate = DateTime.now();
@@ -6530,6 +6664,9 @@ class _EditRecordPageState extends State<EditRecordPage> {
     selectedDate = record.date;
     amountController.text = record.amount.toStringAsFixed(2);
     noteController.text = record.note;
+    photoDataUris
+      ..clear()
+      ..addAll(record.photoDataUris);
     final categories = type == RecordType.expense
         ? expenseCategories
         : incomeCategories;
@@ -6624,8 +6761,11 @@ class _EditRecordPageState extends State<EditRecordPage> {
           ),
           RecordBottomPanel(
             noteController: noteController,
+            photoDataUris: photoDataUris,
             selectedDate: selectedDate,
             onPickDate: _pickDate,
+            onAddPhoto: _addPhotos,
+            onRemovePhoto: _removePhoto,
             onSave: () => _saveRecord(existingRecord, selectedCategory),
             buttonText: '保存修改',
           ),
@@ -6683,6 +6823,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
         amount: amount,
         note: noteController.text.trim(),
         date: selectedDate,
+        photoDataUris: List.unmodifiable(photoDataUris),
       ),
     );
     if (!mounted) return;
@@ -6693,6 +6834,19 @@ class _EditRecordPageState extends State<EditRecordPage> {
       fallbackMessage: '账单已更新',
     );
     Navigator.pop(context);
+  }
+
+  Future<void> _addPhotos() async {
+    final pickedPhotos = await pickRecordPhotos(
+      context,
+      currentCount: photoDataUris.length,
+    );
+    if (pickedPhotos.isEmpty || !mounted) return;
+    setState(() => photoDataUris.addAll(pickedPhotos));
+  }
+
+  void _removePhoto(int index) {
+    setState(() => photoDataUris.removeAt(index));
   }
 }
 
@@ -6732,6 +6886,67 @@ class DetailRow extends StatelessWidget {
               textAlign: TextAlign.right,
               style: const TextStyle(color: _mutedColor),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DetailPhotoCard extends StatelessWidget {
+  const DetailPhotoCard({super.key, required this.photoDataUris});
+
+  final List<String> photoDataUris;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: whiteCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.photo_library_rounded, color: _primaryColor),
+              SizedBox(width: 12),
+              Text(
+                '照片',
+                style: TextStyle(
+                  color: _textColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: photoDataUris.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 1,
+            ),
+            itemBuilder: (context, index) {
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.memory(
+                  imageBytesFromDataUri(photoDataUris[index]),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(
+                    color: _softColor,
+                    child: const Icon(
+                      Icons.broken_image_rounded,
+                      color: _mutedColor,
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -7330,6 +7545,134 @@ void showNewAchievementToast(
 
   final names = newBadges.map((badge) => badge.title).join('、');
   showToast(context, '解锁成就：$names');
+}
+
+const _maxRecordPhotos = 3;
+
+enum RecordPhotoSource { gallery, camera }
+
+Future<List<String>> pickRecordPhotos(
+  BuildContext context, {
+  required int currentCount,
+}) async {
+  final remaining = _maxRecordPhotos - currentCount;
+  if (remaining <= 0) {
+    showToast(context, '最多添加 $_maxRecordPhotos 张照片');
+    return const [];
+  }
+
+  final source = await showModalBottomSheet<RecordPhotoSource>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (context) {
+      return SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBF8),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: _primaryColor.withValues(alpha: 0.16)),
+            boxShadow: softShadow(),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 4),
+              const Text(
+                '添加备注照片',
+                style: TextStyle(
+                  color: _textColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(
+                  Icons.photo_library_rounded,
+                  color: _primaryColor,
+                ),
+                title: const Text('从相册选择'),
+                onTap: () => Navigator.pop(context, RecordPhotoSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.photo_camera_rounded,
+                  color: _primaryColor,
+                ),
+                title: const Text('拍摄照片'),
+                onTap: () => Navigator.pop(context, RecordPhotoSource.camera),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+  if (source == null) return const [];
+
+  try {
+    final picker = ImagePicker();
+    final pickedFiles = <XFile>[];
+    if (source == RecordPhotoSource.gallery) {
+      pickedFiles.addAll(
+        await picker.pickMultiImage(maxWidth: 1280, imageQuality: 72),
+      );
+    } else {
+      final file = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1280,
+        imageQuality: 72,
+      );
+      if (file != null) pickedFiles.add(file);
+    }
+
+    if (!context.mounted) return const [];
+    if (pickedFiles.length > remaining) {
+      showToast(context, '最多还能添加 $remaining 张照片');
+    }
+
+    final result = <String>[];
+    for (final file in pickedFiles.take(remaining)) {
+      result.add(await recordPhotoDataUri(file));
+    }
+    return result;
+  } catch (_) {
+    if (!context.mounted) return const [];
+    showToast(context, '照片读取失败，请再试一次');
+    return const [];
+  }
+}
+
+Future<String> recordPhotoDataUri(XFile file) async {
+  final bytes = await file.readAsBytes();
+  final mimeType = file.mimeType ?? recordPhotoMimeType(file.path);
+  return 'data:$mimeType;base64,${base64Encode(bytes)}';
+}
+
+String recordPhotoMimeType(String path) {
+  final lowerPath = path.toLowerCase();
+  if (lowerPath.endsWith('.png')) return 'image/png';
+  if (lowerPath.endsWith('.webp')) return 'image/webp';
+  if (lowerPath.endsWith('.gif')) return 'image/gif';
+  return 'image/jpeg';
+}
+
+Uint8List imageBytesFromDataUri(String dataUri) {
+  final commaIndex = dataUri.indexOf(',');
+  final payload = commaIndex == -1
+      ? dataUri
+      : dataUri.substring(commaIndex + 1);
+  return base64Decode(payload);
+}
+
+String recordListSubtitle(AccountRecord record) {
+  final noteText = record.note.isEmpty ? '无备注' : record.note;
+  final photoText = record.photoDataUris.isEmpty
+      ? ''
+      : ' · ${record.photoDataUris.length} 张照片';
+  return '$noteText$photoText · ${formatRecordDate(record.date)}';
 }
 
 class AchievementPage extends StatelessWidget {
