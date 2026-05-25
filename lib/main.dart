@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reminder_service.dart';
@@ -634,28 +635,85 @@ class TrendPoint {
 }
 
 class HomeRecordFilter {
-  const HomeRecordFilter({required this.month, this.type, this.category});
+  const HomeRecordFilter({
+    required this.month,
+    this.startDate,
+    this.endDate,
+    this.type,
+    this.category,
+    this.expenseCategories,
+    this.incomeCategories,
+    this.minAmount = 0,
+    this.maxAmount = 9999999,
+  });
 
   final DateTime month;
+  final DateTime? startDate;
+  final DateTime? endDate;
   final RecordType? type;
   final String? category;
+  final Set<String>? expenseCategories;
+  final Set<String>? incomeCategories;
+  final double minAmount;
+  final double maxAmount;
+
+  DateTime get effectiveStartDate => dateOnly(startDate ?? monthStart(month));
+  DateTime get effectiveEndDate => dateOnly(endDate ?? monthEnd(month));
 
   HomeRecordFilter copyWith({
     DateTime? month,
+    Object? startDate = _filterNoChange,
+    Object? endDate = _filterNoChange,
     Object? type = _filterNoChange,
     Object? category = _filterNoChange,
+    Object? expenseCategories = _filterNoChange,
+    Object? incomeCategories = _filterNoChange,
+    double? minAmount,
+    double? maxAmount,
   }) {
     return HomeRecordFilter(
       month: month ?? this.month,
+      startDate: startDate == _filterNoChange
+          ? this.startDate
+          : startDate as DateTime?,
+      endDate: endDate == _filterNoChange ? this.endDate : endDate as DateTime?,
       type: type == _filterNoChange ? this.type : type as RecordType?,
       category: category == _filterNoChange
           ? this.category
           : category as String?,
+      expenseCategories: expenseCategories == _filterNoChange
+          ? this.expenseCategories
+          : (expenseCategories as Set<String>?)?.toSet(),
+      incomeCategories: incomeCategories == _filterNoChange
+          ? this.incomeCategories
+          : (incomeCategories as Set<String>?)?.toSet(),
+      minAmount: minAmount ?? this.minAmount,
+      maxAmount: maxAmount ?? this.maxAmount,
     );
   }
 }
 
 const Object _filterNoChange = Object();
+
+Set<String>? toggledCategorySet(Set<String>? current, String category) {
+  final next = {...?current};
+  if (next.contains(category)) {
+    next.remove(category);
+  } else {
+    next.add(category);
+  }
+  return next.isEmpty ? null : next;
+}
+
+Set<String>? categoryNameSet(List<CategoryOption> categories) {
+  if (categories.isEmpty) return null;
+  return categories.map((category) => category.name).toSet();
+}
+
+bool areSameCategorySet(Set<String>? left, Set<String>? right) {
+  if (left == null || right == null) return left == right;
+  return left.length == right.length && left.containsAll(right);
+}
 
 class AmountInputFormatter extends TextInputFormatter {
   final RegExp _pattern = RegExp(r'^\d{0,9}(\.\d{0,2})?$');
@@ -1489,24 +1547,41 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  late HomeRecordFilter recordFilter = HomeRecordFilter(
-    month: DateTime(DateTime.now().year, DateTime.now().month),
-  );
+  late HomeRecordFilter recordFilter = defaultHomeRecordFilter();
 
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    final monthRecords = store
-        .recordsForRange(StatsRange.month, anchorDate: recordFilter.month)
-        .where((record) {
-          final typeMatches =
-              recordFilter.type == null || record.type == recordFilter.type;
-          final categoryMatches =
-              recordFilter.category == null ||
-              record.category == recordFilter.category;
-          return typeMatches && categoryMatches;
-        })
-        .toList();
+    final filteredRecords = store.records.where((record) {
+      final recordDay = dateOnly(record.date);
+      final dateMatches =
+          !recordDay.isBefore(recordFilter.effectiveStartDate) &&
+          !recordDay.isAfter(recordFilter.effectiveEndDate);
+      final legacyTypeMatches =
+          recordFilter.type == null || record.type == recordFilter.type;
+      final legacyCategoryMatches =
+          recordFilter.category == null ||
+          record.category == recordFilter.category;
+      final splitCategoryActive =
+          recordFilter.expenseCategories != null ||
+          recordFilter.incomeCategories != null;
+      final splitCategoryMatches =
+          !splitCategoryActive ||
+          (record.type == RecordType.expense &&
+              recordFilter.expenseCategories != null &&
+              recordFilter.expenseCategories!.contains(record.category)) ||
+          (record.type == RecordType.income &&
+              recordFilter.incomeCategories != null &&
+              recordFilter.incomeCategories!.contains(record.category));
+      final amountMatches =
+          record.amount >= recordFilter.minAmount &&
+          record.amount <= recordFilter.maxAmount;
+      return dateMatches &&
+          legacyTypeMatches &&
+          legacyCategoryMatches &&
+          splitCategoryMatches &&
+          amountMatches;
+    }).toList();
     final todayRecords = store.recordsForRange(StatsRange.day);
     final todayExpense = todayRecords
         .where((record) => record.type == RecordType.expense)
@@ -1601,14 +1676,14 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const SizedBox(height: 12),
-            if (monthRecords.isEmpty)
+            if (filteredRecords.isEmpty)
               EmptyState(
                 icon: Icons.receipt_long_rounded,
-                title: '${formatYearMonth(recordFilter.month)}没有匹配记录',
+                title: '${filterDateRangeLabel(recordFilter)}没有匹配记录',
                 subtitle: '调整筛选条件或去「记账」页添加收支吧',
               )
             else
-              RecordGroupList(records: monthRecords),
+              RecordGroupList(records: filteredRecords),
           ],
         ),
       ),
@@ -2065,11 +2140,25 @@ class HomeRecordFilterButton extends StatelessWidget {
 }
 
 bool isDefaultHomeRecordFilter(HomeRecordFilter filter) {
-  final now = DateTime.now();
-  return filter.month.year == now.year &&
-      filter.month.month == now.month &&
+  final defaultFilter = defaultHomeRecordFilter();
+  return filter.effectiveStartDate == defaultFilter.effectiveStartDate &&
+      filter.effectiveEndDate == defaultFilter.effectiveEndDate &&
       filter.type == null &&
-      filter.category == null;
+      filter.category == null &&
+      filter.expenseCategories == null &&
+      filter.incomeCategories == null &&
+      filter.minAmount == 0 &&
+      filter.maxAmount == 9999999;
+}
+
+HomeRecordFilter defaultHomeRecordFilter() {
+  final now = DateTime.now();
+  final month = DateTime(now.year, now.month);
+  return HomeRecordFilter(
+    month: month,
+    startDate: monthStart(month),
+    endDate: monthEnd(month),
+  );
 }
 
 class HomeRecordFilterPage extends StatefulWidget {
@@ -2083,25 +2172,51 @@ class HomeRecordFilterPage extends StatefulWidget {
 
 class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
   late HomeRecordFilter filter = widget.initialFilter;
+  late final TextEditingController minAmountController;
+  late final TextEditingController maxAmountController;
+
+  @override
+  void initState() {
+    super.initState();
+    minAmountController = TextEditingController(
+      text: amountFilterText(widget.initialFilter.minAmount),
+    );
+    maxAmountController = TextEditingController(
+      text: amountFilterText(widget.initialFilter.maxAmount),
+    );
+  }
+
+  @override
+  void dispose() {
+    minAmountController.dispose();
+    maxAmountController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    final categoryNames = filter.type == null
-        ? const <String>{}
-        : store
-              .recordsForRange(StatsRange.month, anchorDate: filter.month)
-              .where((record) => record.type == filter.type)
-              .map((record) => record.category)
-              .toSet();
-    final categorySource = filter.type == RecordType.income
-        ? incomeCategories
-        : expenseCategories;
-    final categories = filter.type == null
-        ? const <CategoryOption>[]
-        : categorySource
-              .where((category) => categoryNames.contains(category.name))
-              .toList();
+    final recordsInRange = store.records.where((record) {
+      final recordDay = dateOnly(record.date);
+      return !recordDay.isBefore(filter.effectiveStartDate) &&
+          !recordDay.isAfter(filter.effectiveEndDate) &&
+          record.amount >= filter.minAmount &&
+          record.amount <= filter.maxAmount;
+    }).toList();
+    final expenseCategoryNames = recordsInRange
+        .where((record) => record.type == RecordType.expense)
+        .map((record) => record.category)
+        .toSet();
+    final incomeCategoryNames = recordsInRange
+        .where((record) => record.type == RecordType.income)
+        .map((record) => record.category)
+        .toSet();
+    final expenseFilterCategories = expenseCategories
+        .where((category) => expenseCategoryNames.contains(category.name))
+        .toList();
+    final incomeFilterCategories = incomeCategories
+        .where((category) => incomeCategoryNames.contains(category.name))
+        .toList();
     return Scaffold(
       appBar: AppBar(
         title: const Text('筛选'),
@@ -2118,104 +2233,49 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
               child: Column(
                 children: [
                   FilterActionRow(
-                    icon: Icons.calendar_month_rounded,
-                    title: '月份',
-                    value: formatYearMonth(filter.month),
-                    onTap: pickMonth,
+                    icon: Icons.date_range_rounded,
+                    title: '时间',
+                    value: filterDateRangeLabel(filter),
+                    onTap: pickDateRange,
                   ),
                   const Divider(height: 1, color: Color(0xFFFFE6DD)),
-                  FilterActionRow(
-                    icon: Icons.swap_horiz_rounded,
-                    title: '类型',
-                    value: filter.type == null
-                        ? '全部'
-                        : recordTypeLabel(filter.type!),
-                    onTap: () {},
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FilterChipButton(
-                          label: '支出',
-                          selected: filter.type == RecordType.expense,
-                          onTap: () => setState(
-                            () => filter = filter.copyWith(
-                              type: RecordType.expense,
-                              category: null,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        FilterChipButton(
-                          label: '收入',
-                          selected: filter.type == RecordType.income,
-                          onTap: () => setState(
-                            () => filter = filter.copyWith(
-                              type: RecordType.income,
-                              category: null,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                  FilterAmountRangeRow(
+                    minController: minAmountController,
+                    maxController: maxAmountController,
+                    onChanged: updateAmountFilter,
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 18),
-            const SectionTitle(title: '分类'),
-            const SizedBox(height: 12),
             Expanded(
-              child: FilterCard(
-                child: filter.type == null
-                    ? const Center(
-                        child: Text(
-                          '选择支出或收入后，可以继续筛选分类',
-                          style: TextStyle(
-                            color: _mutedColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      )
-                    : categories.isEmpty
-                    ? Center(
-                        child: Text(
-                          '${formatYearMonth(filter.month)}没有${recordTypeLabel(filter.type!)}记录',
-                          style: const TextStyle(
-                            color: _mutedColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      )
-                    : GridView.builder(
-                        itemCount: categories.length + 1,
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 4,
-                              mainAxisSpacing: 14,
-                              crossAxisSpacing: 14,
-                              childAspectRatio: 0.85,
-                            ),
-                        itemBuilder: (context, index) {
-                          if (index == 0) {
-                            return FilterAllCategoryTile(
-                              selected: filter.category == null,
-                              onTap: () => setState(
-                                () => filter = filter.copyWith(category: null),
-                              ),
-                            );
-                          }
-                          final category = categories[index - 1];
-                          return CategoryTile(
-                            option: category,
-                            selected: filter.category == category.name,
-                            onTap: () => setState(
-                              () => filter = filter.copyWith(
-                                category: category.name,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  SplitCategorySection(
+                    title: '支出分类',
+                    emptyText: '${filterDateRangeLabel(filter)}没有支出记录',
+                    categories: expenseFilterCategories,
+                    selectedCategories: filter.expenseCategories,
+                    onSelect: (category) =>
+                        setState(() => toggleExpenseCategory(category)),
+                    onToggleAll: () => setState(
+                      () => toggleAllExpenseCategories(expenseFilterCategories),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SplitCategorySection(
+                    title: '收入分类',
+                    emptyText: '${filterDateRangeLabel(filter)}没有收入记录',
+                    categories: incomeFilterCategories,
+                    selectedCategories: filter.incomeCategories,
+                    onSelect: (category) =>
+                        setState(() => toggleIncomeCategory(category)),
+                    onToggleAll: () => setState(
+                      () => toggleAllIncomeCategories(incomeFilterCategories),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -2261,7 +2321,7 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
                 width: double.infinity,
                 height: 46,
                 child: OutlinedButton(
-                  onPressed: () => Navigator.pop(context, filter),
+                  onPressed: applyFilter,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryColor,
                     side: const BorderSide(color: _primaryColor),
@@ -2283,27 +2343,116 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
     );
   }
 
-  Future<void> pickMonth() async {
-    final selected = await showModalBottomSheet<DateTime>(
+  Future<void> pickDateRange() async {
+    final selected = await showDateRangePicker(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => MonthPickerSheet(value: filter.month),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      initialDateRange: DateTimeRange(
+        start: filter.effectiveStartDate,
+        end: filter.effectiveEndDate,
+      ),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: const Color(0xFFFFFBF8),
+              onSurface: _textColor,
+            ),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
     );
     if (selected == null) return;
     setState(() {
       filter = filter.copyWith(
-        month: DateTime(selected.year, selected.month),
+        month: DateTime(selected.start.year, selected.start.month),
+        startDate: dateOnly(selected.start),
+        endDate: dateOnly(selected.end),
         category: null,
       );
     });
   }
 
-  void resetFilter() {
+  void updateAmountFilter() {
+    final minAmount = double.tryParse(minAmountController.text.trim()) ?? 0;
+    final maxAmount =
+        double.tryParse(maxAmountController.text.trim()) ?? 9999999;
     setState(() {
-      filter = HomeRecordFilter(
-        month: DateTime(DateTime.now().year, DateTime.now().month),
+      filter = filter.copyWith(
+        minAmount: math.max(0, minAmount),
+        maxAmount: math.max(0, maxAmount),
       );
     });
+  }
+
+  void applyFilter() {
+    updateAmountFilter();
+    final minAmount = double.tryParse(minAmountController.text.trim()) ?? 0;
+    final maxAmount =
+        double.tryParse(maxAmountController.text.trim()) ?? 9999999;
+    if (maxAmount < minAmount) {
+      showToast(context, '最高金额不能小于最低金额');
+      return;
+    }
+    Navigator.pop(
+      context,
+      filter.copyWith(
+        minAmount: math.max(0, minAmount),
+        maxAmount: math.max(0, maxAmount),
+      ),
+    );
+  }
+
+  void resetFilter() {
+    setState(() {
+      filter = defaultHomeRecordFilter();
+      minAmountController.text = '0';
+      maxAmountController.text = '9999999';
+    });
+  }
+
+  void toggleExpenseCategory(String category) {
+    filter = filter.copyWith(
+      type: null,
+      category: null,
+      expenseCategories: toggledCategorySet(filter.expenseCategories, category),
+    );
+  }
+
+  void toggleIncomeCategory(String category) {
+    filter = filter.copyWith(
+      type: null,
+      category: null,
+      incomeCategories: toggledCategorySet(filter.incomeCategories, category),
+    );
+  }
+
+  void toggleAllExpenseCategories(List<CategoryOption> categories) {
+    final allCategories = categoryNameSet(categories);
+    filter = filter.copyWith(
+      type: null,
+      category: null,
+      expenseCategories:
+          areSameCategorySet(filter.expenseCategories, allCategories)
+          ? null
+          : allCategories,
+    );
+  }
+
+  void toggleAllIncomeCategories(List<CategoryOption> categories) {
+    final allCategories = categoryNameSet(categories);
+    filter = filter.copyWith(
+      type: null,
+      category: null,
+      incomeCategories:
+          areSameCategorySet(filter.incomeCategories, allCategories)
+          ? null
+          : allCategories,
+    );
   }
 }
 
@@ -2366,6 +2515,81 @@ class FilterAllCategoryTile extends StatelessWidget {
   }
 }
 
+class SplitCategorySection extends StatelessWidget {
+  const SplitCategorySection({
+    super.key,
+    required this.title,
+    required this.emptyText,
+    required this.categories,
+    required this.selectedCategories,
+    required this.onSelect,
+    required this.onToggleAll,
+  });
+
+  final String title;
+  final String emptyText;
+  final List<CategoryOption> categories;
+  final Set<String>? selectedCategories;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onToggleAll;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(child: SectionTitle(title: title)),
+            TextButton(
+              onPressed: onToggleAll,
+              child: Text(
+                selectedCategories == null ? '全部' : '取消选择',
+                style: const TextStyle(
+                  color: _textColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (categories.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            child: Text(
+              emptyText,
+              style: const TextStyle(
+                color: _mutedColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: categories.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              mainAxisSpacing: 14,
+              crossAxisSpacing: 14,
+              childAspectRatio: 0.85,
+            ),
+            itemBuilder: (context, index) {
+              final category = categories[index];
+              return CategoryTile(
+                option: category,
+                selected: selectedCategories?.contains(category.name) ?? false,
+                onTap: () => onSelect(category.name),
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
 class FilterCard extends StatelessWidget {
   const FilterCard({super.key, required this.child});
 
@@ -2378,6 +2602,112 @@ class FilterCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: whiteCardDecoration(),
       child: child,
+    );
+  }
+}
+
+class FilterAmountRangeRow extends StatelessWidget {
+  const FilterAmountRangeRow({
+    super.key,
+    required this.minController,
+    required this.maxController,
+    required this.onChanged,
+  });
+
+  final TextEditingController minController;
+  final TextEditingController maxController;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.payments_rounded, color: _primaryColor),
+          const SizedBox(width: 12),
+          const Text(
+            '金额',
+            style: TextStyle(color: _textColor, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(width: 18),
+          Expanded(
+            child: FilterAmountInput(
+              controller: minController,
+              hintText: '最低',
+              onChanged: onChanged,
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              '-',
+              style: TextStyle(
+                color: _mutedColor,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            child: FilterAmountInput(
+              controller: maxController,
+              hintText: '最高',
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class FilterAmountInput extends StatelessWidget {
+  const FilterAmountInput({
+    super.key,
+    required this.controller,
+    required this.hintText,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final String hintText;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 38,
+      child: TextField(
+        controller: controller,
+        textAlign: TextAlign.center,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [AmountInputFormatter()],
+        onChanged: (_) => onChanged(),
+        decoration: InputDecoration(
+          hintText: hintText,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
+          filled: true,
+          fillColor: const Color(0xFFFFF0E8),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFFFD6C9)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: _primaryColor),
+          ),
+        ),
+        style: const TextStyle(
+          color: _textColor,
+          fontSize: 13,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
@@ -5788,8 +6118,15 @@ class ReminderSettingRow extends StatelessWidget {
   }
 }
 
-class AboutUsPage extends StatelessWidget {
+class AboutUsPage extends StatefulWidget {
   const AboutUsPage({super.key});
+
+  @override
+  State<AboutUsPage> createState() => _AboutUsPageState();
+}
+
+class _AboutUsPageState extends State<AboutUsPage> {
+  late final Future<PackageInfo> packageInfo = PackageInfo.fromPlatform();
 
   @override
   Widget build(BuildContext context) {
@@ -5845,10 +6182,16 @@ class AboutUsPage extends StatelessWidget {
               content: '喵记账用于记录日常支出、收入、预算和储蓄进度，帮助你用更轻松的方式了解每月花销。',
               icon: Icons.auto_awesome_rounded,
             ),
-            const AboutInfoCard(
-              title: '基础信息',
-              content: '版本：1.0.1\n适用场景：个人日常记账、分类预算、消费统计',
-              icon: Icons.apps_rounded,
+            FutureBuilder<PackageInfo>(
+              future: packageInfo,
+              builder: (context, snapshot) {
+                final version = snapshot.data?.version ?? '读取中';
+                return AboutInfoCard(
+                  title: '基础信息',
+                  content: '版本：$version\n适用场景：个人日常记账、分类预算、消费统计',
+                  icon: Icons.apps_rounded,
+                );
+              },
             ),
             const AboutInfoCard(
               title: '数据说明',
@@ -6309,7 +6652,10 @@ class CompactRecordItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isIncome = record.type == RecordType.income;
-    final subtitle = record.note.trim().isEmpty ? null : record.note.trim();
+    final note = record.note.trim();
+    final subtitle = note.isEmpty
+        ? formatTime(record.date)
+        : '$note · ${formatTime(record.date)}';
     return Dismissible(
       key: ValueKey('compact-${record.id}'),
       direction: DismissDirection.endToStart,
@@ -6375,18 +6721,16 @@ class CompactRecordItem extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFFAFA5A0),
-                          fontSize: 12,
-                        ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFAFA5A0),
+                        fontSize: 12,
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
@@ -8286,8 +8630,36 @@ String formatTime(DateTime date) {
 
 String twoDigits(int value) => value.toString().padLeft(2, '0');
 
+String amountFilterText(double value) {
+  return value % 1 == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
+}
+
+DateTime dateOnly(DateTime date) {
+  return DateTime(date.year, date.month, date.day);
+}
+
+DateTime monthStart(DateTime date) {
+  return DateTime(date.year, date.month);
+}
+
+DateTime monthEnd(DateTime date) {
+  return DateTime(date.year, date.month + 1, 0);
+}
+
 String formatMonthDay(DateTime date) {
   return '${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}';
+}
+
+String filterDateRangeLabel(HomeRecordFilter filter) {
+  final start = filter.effectiveStartDate;
+  final end = filter.effectiveEndDate;
+  if (start == monthStart(start) && end == monthEnd(start)) {
+    return formatYearMonth(start);
+  }
+  if (start.year == end.year) {
+    return '${formatMonthDay(start)}-${formatMonthDay(end)}';
+  }
+  return '${formatDate(start)}-${formatDate(end)}';
 }
 
 String formatYearMonth(DateTime date) {
