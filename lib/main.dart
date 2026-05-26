@@ -104,6 +104,7 @@ class PageBackground extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
+        const ColoredBox(color: _bgColor),
         Image.asset(
           'assets/images/page_bg.png',
           fit: BoxFit.cover,
@@ -113,6 +114,12 @@ class PageBackground extends StatelessWidget {
       ],
     );
   }
+}
+
+Route<T> appPageRoute<T>(WidgetBuilder builder) {
+  return MaterialPageRoute<T>(
+    builder: (context) => PageBackground(child: builder(context)),
+  );
 }
 
 class AppScope extends InheritedNotifier<AppStore> {
@@ -140,6 +147,8 @@ class AppStore extends ChangeNotifier {
   int reminderMinute = 0;
   String reminderTitle = '喵记账';
   String reminderMessage = '喵~今天你记账了吗？';
+  String profileNickname = '猫猫记账员';
+  String? profileAvatarDataUri;
   double monthlyBudget = 0;
   String savingGoalName = '储蓄目标';
   double savingGoalTarget = 0;
@@ -179,6 +188,14 @@ class AppStore extends ChangeNotifier {
         (data['reminderMessage'] as String?)?.trim().isNotEmpty == true
         ? (data['reminderMessage'] as String).trim()
         : '喵~今天你记账了吗？';
+    profileNickname =
+        (data['profileNickname'] as String?)?.trim().isNotEmpty == true
+        ? (data['profileNickname'] as String).trim()
+        : '猫猫记账员';
+    profileAvatarDataUri =
+        (data['profileAvatarDataUri'] as String?)?.trim().isNotEmpty == true
+        ? data['profileAvatarDataUri'] as String
+        : null;
     categoryBudgets
       ..clear()
       ..addAll(
@@ -300,6 +317,13 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
     await _save();
     await _syncReminderSchedule();
+  }
+
+  Future<void> updateProfile({required String nickname, String? avatar}) async {
+    profileNickname = nickname.trim().isEmpty ? '猫猫记账员' : nickname.trim();
+    profileAvatarDataUri = avatar?.trim().isNotEmpty == true ? avatar : null;
+    notifyListeners();
+    await _save();
   }
 
   Future<void> clearAll() async {
@@ -472,6 +496,8 @@ class AppStore extends ChangeNotifier {
       'reminderMinute': reminderMinute,
       'reminderTitle': reminderTitle,
       'reminderMessage': reminderMessage,
+      'profileNickname': profileNickname,
+      'profileAvatarDataUri': profileAvatarDataUri,
       'records': records.map((record) => record.toJson()).toList(),
     };
     await prefs.setString(_storageKey, jsonEncode(data));
@@ -497,6 +523,8 @@ class AppStore extends ChangeNotifier {
     reminderMinute = 0;
     reminderTitle = '喵记账';
     reminderMessage = '喵~今天你记账了吗？';
+    profileNickname = '猫猫记账员';
+    profileAvatarDataUri = null;
     records.clear();
     categoryBudgets.clear();
   }
@@ -645,6 +673,8 @@ class HomeRecordFilter {
     this.incomeCategories,
     this.minAmount = 0,
     this.maxAmount = 9999999,
+    this.noteKeyword = '',
+    this.onlyWithPhotos = false,
   });
 
   final DateTime month;
@@ -656,6 +686,8 @@ class HomeRecordFilter {
   final Set<String>? incomeCategories;
   final double minAmount;
   final double maxAmount;
+  final String noteKeyword;
+  final bool onlyWithPhotos;
 
   DateTime get effectiveStartDate => dateOnly(startDate ?? monthStart(month));
   DateTime get effectiveEndDate => dateOnly(endDate ?? monthEnd(month));
@@ -670,6 +702,8 @@ class HomeRecordFilter {
     Object? incomeCategories = _filterNoChange,
     double? minAmount,
     double? maxAmount,
+    String? noteKeyword,
+    bool? onlyWithPhotos,
   }) {
     return HomeRecordFilter(
       month: month ?? this.month,
@@ -689,6 +723,8 @@ class HomeRecordFilter {
           : (incomeCategories as Set<String>?)?.toSet(),
       minAmount: minAmount ?? this.minAmount,
       maxAmount: maxAmount ?? this.maxAmount,
+      noteKeyword: noteKeyword ?? this.noteKeyword,
+      onlyWithPhotos: onlyWithPhotos ?? this.onlyWithPhotos,
     );
   }
 }
@@ -1409,9 +1445,7 @@ class LoginPage extends StatelessWidget {
                           onPressed: () {
                             Navigator.pushReplacement(
                               context,
-                              MaterialPageRoute(
-                                builder: (_) => const MainPage(),
-                              ),
+                              appPageRoute((_) => const MainPage()),
                             );
                           },
                           fontSize: 18,
@@ -1576,11 +1610,18 @@ class _HomePageState extends State<HomePage> {
       final amountMatches =
           record.amount >= recordFilter.minAmount &&
           record.amount <= recordFilter.maxAmount;
+      final noteKeyword = recordFilter.noteKeyword.trim();
+      final noteMatches =
+          noteKeyword.isEmpty || record.note.contains(noteKeyword);
+      final photoMatches =
+          !recordFilter.onlyWithPhotos || record.photoDataUris.isNotEmpty;
       return dateMatches &&
           legacyTypeMatches &&
           legacyCategoryMatches &&
           splitCategoryMatches &&
-          amountMatches;
+          amountMatches &&
+          noteMatches &&
+          photoMatches;
     }).toList();
     final todayRecords = store.recordsForRange(StatsRange.day);
     final todayExpense = todayRecords
@@ -1658,9 +1699,7 @@ class _HomePageState extends State<HomePage> {
               onViewAll: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const TodayOverviewDetailPage(),
-                  ),
+                  appPageRoute((_) => const TodayOverviewDetailPage()),
                 );
               },
             ),
@@ -2083,9 +2122,7 @@ class HomeRecordFilterButton extends StatelessWidget {
   Future<void> _openFilter(BuildContext context) async {
     final selected = await Navigator.push<HomeRecordFilter>(
       context,
-      MaterialPageRoute(
-        builder: (_) => HomeRecordFilterPage(initialFilter: filter),
-      ),
+      appPageRoute((_) => HomeRecordFilterPage(initialFilter: filter)),
     );
     if (selected == null) return;
     onChanged(selected);
@@ -2148,7 +2185,9 @@ bool isDefaultHomeRecordFilter(HomeRecordFilter filter) {
       filter.expenseCategories == null &&
       filter.incomeCategories == null &&
       filter.minAmount == 0 &&
-      filter.maxAmount == 9999999;
+      filter.maxAmount == 9999999 &&
+      filter.noteKeyword.trim().isEmpty &&
+      !filter.onlyWithPhotos;
 }
 
 HomeRecordFilter defaultHomeRecordFilter() {
@@ -2174,6 +2213,7 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
   late HomeRecordFilter filter = widget.initialFilter;
   late final TextEditingController minAmountController;
   late final TextEditingController maxAmountController;
+  late final TextEditingController noteController;
 
   @override
   void initState() {
@@ -2184,12 +2224,16 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
     maxAmountController = TextEditingController(
       text: amountFilterText(widget.initialFilter.maxAmount),
     );
+    noteController = TextEditingController(
+      text: widget.initialFilter.noteKeyword,
+    );
   }
 
   @override
   void dispose() {
     minAmountController.dispose();
     maxAmountController.dispose();
+    noteController.dispose();
     super.dispose();
   }
 
@@ -2201,7 +2245,10 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
       return !recordDay.isBefore(filter.effectiveStartDate) &&
           !recordDay.isAfter(filter.effectiveEndDate) &&
           record.amount >= filter.minAmount &&
-          record.amount <= filter.maxAmount;
+          record.amount <= filter.maxAmount &&
+          (filter.noteKeyword.trim().isEmpty ||
+              record.note.contains(filter.noteKeyword.trim())) &&
+          (!filter.onlyWithPhotos || record.photoDataUris.isNotEmpty);
     }).toList();
     final expenseCategoryNames = recordsInRange
         .where((record) => record.type == RecordType.expense)
@@ -2242,7 +2289,23 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
                   FilterAmountRangeRow(
                     minController: minAmountController,
                     maxController: maxAmountController,
+                    minIsDefault: filter.minAmount == 0,
+                    maxIsDefault: filter.maxAmount == 9999999,
                     onChanged: updateAmountFilter,
+                  ),
+                  const Divider(height: 1, color: Color(0xFFFFE6DD)),
+                  FilterNoteRow(
+                    controller: noteController,
+                    onChanged: updateNoteFilter,
+                  ),
+                  const Divider(height: 1, color: Color(0xFFFFE6DD)),
+                  FilterPhotoOnlyRow(
+                    value: filter.onlyWithPhotos,
+                    onChanged: (value) {
+                      setState(
+                        () => filter = filter.copyWith(onlyWithPhotos: value),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -2389,6 +2452,12 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
     });
   }
 
+  void updateNoteFilter() {
+    setState(() {
+      filter = filter.copyWith(noteKeyword: noteController.text.trim());
+    });
+  }
+
   void applyFilter() {
     updateAmountFilter();
     final minAmount = double.tryParse(minAmountController.text.trim()) ?? 0;
@@ -2403,6 +2472,7 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
       filter.copyWith(
         minAmount: math.max(0, minAmount),
         maxAmount: math.max(0, maxAmount),
+        noteKeyword: noteController.text.trim(),
       ),
     );
   }
@@ -2412,6 +2482,7 @@ class _HomeRecordFilterPageState extends State<HomeRecordFilterPage> {
       filter = defaultHomeRecordFilter();
       minAmountController.text = '0';
       maxAmountController.text = '9999999';
+      noteController.clear();
     });
   }
 
@@ -2611,11 +2682,15 @@ class FilterAmountRangeRow extends StatelessWidget {
     super.key,
     required this.minController,
     required this.maxController,
+    required this.minIsDefault,
+    required this.maxIsDefault,
     required this.onChanged,
   });
 
   final TextEditingController minController;
   final TextEditingController maxController;
+  final bool minIsDefault;
+  final bool maxIsDefault;
   final VoidCallback onChanged;
 
   @override
@@ -2634,6 +2709,7 @@ class FilterAmountRangeRow extends StatelessWidget {
           Expanded(
             child: FilterAmountInput(
               controller: minController,
+              isPlaceholderStyle: minIsDefault,
               hintText: '最低',
               onChanged: onChanged,
             ),
@@ -2652,6 +2728,7 @@ class FilterAmountRangeRow extends StatelessWidget {
           Expanded(
             child: FilterAmountInput(
               controller: maxController,
+              isPlaceholderStyle: maxIsDefault,
               hintText: '最高',
               onChanged: onChanged,
             ),
@@ -2667,11 +2744,13 @@ class FilterAmountInput extends StatelessWidget {
     super.key,
     required this.controller,
     required this.hintText,
+    required this.isPlaceholderStyle,
     required this.onChanged,
   });
 
   final TextEditingController controller;
   final String hintText;
+  final bool isPlaceholderStyle;
   final VoidCallback onChanged;
 
   @override
@@ -2702,11 +2781,115 @@ class FilterAmountInput extends StatelessWidget {
             borderSide: const BorderSide(color: _primaryColor),
           ),
         ),
-        style: const TextStyle(
-          color: _textColor,
+        style: TextStyle(
+          color: isPlaceholderStyle ? const Color(0x665B3A32) : _textColor,
           fontSize: 13,
           fontWeight: FontWeight.bold,
         ),
+      ),
+    );
+  }
+}
+
+class FilterNoteRow extends StatelessWidget {
+  const FilterNoteRow({
+    super.key,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.notes_rounded, color: _primaryColor),
+          const SizedBox(width: 12),
+          const Text(
+            '备注',
+            style: TextStyle(color: _textColor, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(width: 18),
+          Expanded(
+            child: SizedBox(
+              height: 40,
+              child: TextField(
+                controller: controller,
+                onChanged: (_) => onChanged(),
+                decoration: InputDecoration(
+                  hintText: '请输入备注关键词',
+                  hintStyle: const TextStyle(
+                    color: Color(0x669A6A5C),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 11,
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFFFFF0E8),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: const BorderSide(color: Color(0xFFFFD6C9)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: const BorderSide(color: _primaryColor),
+                  ),
+                ),
+                style: const TextStyle(
+                  color: _textColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class FilterPhotoOnlyRow extends StatelessWidget {
+  const FilterPhotoOnlyRow({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.image_rounded, color: _primaryColor),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              '仅显示有图片记录',
+              style: TextStyle(color: _textColor, fontWeight: FontWeight.bold),
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: _primaryColor,
+            activeTrackColor: const Color(0xFFFFB8C5),
+            inactiveThumbColor: Colors.white,
+            inactiveTrackColor: const Color(0xFFE8E2DE),
+          ),
+        ],
       ),
     );
   }
@@ -4986,7 +5169,7 @@ class BudgetPage extends StatelessWidget {
             borderRadius: BorderRadius.circular(22),
             onTap: () => showBudgetDialog(context, store),
             child: Container(
-              padding: const EdgeInsets.all(22),
+              padding: const EdgeInsets.fromLTRB(22, 22, 16, 22),
               decoration: whiteCardDecoration(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -5086,9 +5269,7 @@ class CategoryBudgetSection extends StatelessWidget {
 void openCategoryBudgetEditor(BuildContext context, {CategoryBudget? budget}) {
   Navigator.push(
     context,
-    MaterialPageRoute(
-      builder: (_) => CategoryBudgetEditPage(budgetId: budget?.id),
-    ),
+    appPageRoute((_) => CategoryBudgetEditPage(budgetId: budget?.id)),
   );
 }
 
@@ -5554,54 +5735,59 @@ class MinePage extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: whiteCardDecoration(),
-            child: Stack(
-              children: [
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: CatPawMark(
-                    size: 28,
-                    color: _primaryColor.withValues(alpha: 0.14),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              Navigator.push(context, appPageRoute((_) => const ProfilePage()));
+            },
+            child: Container(
+              padding: const EdgeInsets.all(22),
+              decoration: whiteCardDecoration(),
+              child: Stack(
+                children: [
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: CatPawMark(
+                      size: 28,
+                      color: _primaryColor.withValues(alpha: 0.14),
+                    ),
                   ),
-                ),
-                Row(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(26),
-                      child: Image.asset(
-                        'assets/images/app_icon.png',
-                        width: 72,
-                        height: 72,
-                        fit: BoxFit.cover,
+                  Row(
+                    children: [
+                      ProfileAvatar(
+                        avatarDataUri: store.profileAvatarDataUri,
+                        size: 72,
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '猫猫记账员',
-                            style: TextStyle(
-                              fontSize: 20,
-                              color: _textColor,
-                              fontWeight: FontWeight.bold,
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              store.profileNickname,
+                              style: TextStyle(
+                                fontSize: 20,
+                                color: _textColor,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '已经认真踩爪记账 ${store.accountingDays} 天',
-                            style: const TextStyle(color: _mutedColor),
-                          ),
-                        ],
+                            const SizedBox(height: 6),
+                            Text(
+                              '已经认真踩爪记账 ${store.accountingDays} 天',
+                              style: const TextStyle(color: _mutedColor),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Color(0xFFB48A7C),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 18),
@@ -5611,7 +5797,7 @@ class MinePage extends StatelessWidget {
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const ReminderSettingsPage()),
+                appPageRoute((_) => const ReminderSettingsPage()),
               );
             },
           ),
@@ -5624,10 +5810,7 @@ class MinePage extends StatelessWidget {
             icon: Icons.info_rounded,
             title: '关于我们',
             onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AboutUsPage()),
-              );
+              Navigator.push(context, appPageRoute((_) => const AboutUsPage()));
             },
           ),
           MineTile(
@@ -5639,6 +5822,215 @@ class MinePage extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class ProfileAvatar extends StatelessWidget {
+  const ProfileAvatar({
+    super.key,
+    required this.avatarDataUri,
+    required this.size,
+  });
+
+  final String? avatarDataUri;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    Uint8List? avatarBytes;
+    if (avatarDataUri != null) {
+      try {
+        avatarBytes = imageBytesFromDataUri(avatarDataUri!);
+      } catch (_) {
+        avatarBytes = null;
+      }
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.36),
+      child: avatarBytes == null
+          ? Image.asset(
+              'assets/images/app_icon.png',
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+            )
+          : Image.memory(
+              avatarBytes,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            ),
+    );
+  }
+}
+
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({super.key});
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  late final TextEditingController nicknameController;
+  String? avatarDataUri;
+  bool initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    nicknameController = TextEditingController();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (initialized) return;
+    final store = AppScope.of(context);
+    nicknameController.text = store.profileNickname;
+    avatarDataUri = store.profileAvatarDataUri;
+    initialized = true;
+  }
+
+  @override
+  void dispose() {
+    nicknameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('个人信息'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 26),
+              decoration: whiteCardDecoration(),
+              child: Column(
+                children: [
+                  GestureDetector(
+                    onTap: pickAvatar,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ProfileAvatar(avatarDataUri: avatarDataUri, size: 96),
+                        Positioned(
+                          right: -4,
+                          bottom: -4,
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: _primaryColor,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 3),
+                            ),
+                            child: const Icon(
+                              Icons.photo_camera_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextButton(
+                    onPressed: pickAvatar,
+                    child: const Text(
+                      '更换头像',
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  if (avatarDataUri != null)
+                    TextButton(
+                      onPressed: () => setState(() => avatarDataUri = null),
+                      child: const Text(
+                        '恢复默认头像',
+                        style: TextStyle(
+                          color: _mutedColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: whiteCardDecoration(),
+              child: TextField(
+                controller: nicknameController,
+                maxLength: 12,
+                decoration: const InputDecoration(
+                  counterText: '',
+                  border: InputBorder.none,
+                  icon: Icon(Icons.badge_rounded, color: _primaryColor),
+                  labelText: '昵称',
+                  labelStyle: TextStyle(color: _mutedColor),
+                  hintText: '请输入昵称',
+                ),
+                style: const TextStyle(
+                  color: _textColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 28),
+            CatPawPrimaryButton(label: '保存修改', onPressed: saveProfile),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> pickAvatar() async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        imageQuality: 80,
+      );
+      if (file == null) return;
+      final dataUri = await recordPhotoDataUri(file);
+      if (!mounted) return;
+      setState(() => avatarDataUri = dataUri);
+    } catch (_) {
+      if (!mounted) return;
+      showToast(context, '头像读取失败，请再试一次');
+    }
+  }
+
+  Future<void> saveProfile() async {
+    final nickname = nicknameController.text.trim();
+    if (nickname.isEmpty) {
+      showToast(context, '请输入昵称');
+      return;
+    }
+    await AppScope.of(
+      context,
+    ).updateProfile(nickname: nickname, avatar: avatarDataUri);
+    if (!mounted) return;
+    showToast(context, '个人信息已保存');
+    Navigator.pop(context);
   }
 }
 
@@ -6681,9 +7073,7 @@ class CompactRecordItem extends StatelessWidget {
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (_) => RecordDetailPage(recordId: record.id),
-            ),
+            appPageRoute((_) => RecordDetailPage(recordId: record.id)),
           );
         },
         child: Padding(
@@ -6788,9 +7178,7 @@ class RecordItem extends StatelessWidget {
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (_) => RecordDetailPage(recordId: record.id),
-            ),
+            appPageRoute((_) => RecordDetailPage(recordId: record.id)),
           );
         },
         child: Container(
@@ -6946,9 +7334,7 @@ class RecordDetailPage extends StatelessWidget {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => EditRecordPage(recordId: record.id),
-                    ),
+                    appPageRoute((_) => EditRecordPage(recordId: record.id)),
                   );
                 },
                 icon: const Icon(Icons.edit_rounded),
@@ -7719,10 +8105,7 @@ Future<void> showGoalDialog(BuildContext context, AppStore store) async {
 }
 
 Future<void> showAchievementDialog(BuildContext context, AppStore store) {
-  return Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const AchievementPage()),
-  );
+  return Navigator.push(context, appPageRoute((_) => const AchievementPage()));
 }
 
 class AchievementBadgeData {
