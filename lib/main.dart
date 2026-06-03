@@ -783,6 +783,10 @@ const expenseCategories = [
   CategoryOption('宠物', Icons.pets_rounded),
   CategoryOption('水电', Icons.bolt_rounded),
   CategoryOption('通讯', Icons.phone_iphone_rounded),
+  CategoryOption('恋爱', Icons.favorite_border_rounded),
+  CategoryOption('追星', Icons.star_rounded),
+  CategoryOption('麻将', Icons.casino_rounded),
+  CategoryOption('房租', Icons.apartment_rounded),
   CategoryOption('医疗', Icons.local_hospital_rounded),
   CategoryOption('学习', Icons.menu_book_rounded),
   CategoryOption('运动', Icons.fitness_center_rounded),
@@ -870,6 +874,14 @@ Color categoryAccentColor(String category) {
       return const Color(0xFFFFC247);
     case '通讯':
       return const Color(0xFF55B6FF);
+    case '恋爱':
+      return const Color(0xFFFF7AA7);
+    case '追星':
+      return const Color(0xFFFFC247);
+    case '麻将':
+      return const Color(0xFF47B98A);
+    case '房租':
+      return const Color(0xFFFF9960);
     case '医疗':
       return const Color(0xFFFF5D78);
     case '学习':
@@ -924,8 +936,6 @@ Color categoryAccentColor(String category) {
       return const Color(0xFF6EA8FF);
     case '彩票':
       return const Color(0xFFFF8B55);
-    case '麻将':
-      return const Color(0xFF8B7CFF);
     default:
       return const Color(0xFFFF7F96);
   }
@@ -2131,12 +2141,40 @@ class HomeRecordFilterButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasExtraFilter = !isDefaultHomeRecordFilter(filter);
+    return PillActionButton(
+      icon: Icons.tune_rounded,
+      label: hasExtraFilter ? '筛选中' : '筛选',
+      iconColor: hasExtraFilter ? _greenColor : _primaryColor,
+      textColor: hasExtraFilter ? _greenColor : _textColor,
+      onTap: () => _openFilter(context),
+    );
+  }
+}
+
+class PillActionButton extends StatelessWidget {
+  const PillActionButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.iconColor = _primaryColor,
+    this.textColor = _textColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color iconColor;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => _openFilter(context),
+        onTap: onTap,
         child: Container(
           height: 36,
           padding: const EdgeInsets.only(left: 12, right: 8),
@@ -2148,16 +2186,12 @@ class HomeRecordFilterButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.tune_rounded,
-                size: 17,
-                color: hasExtraFilter ? _greenColor : _primaryColor,
-              ),
+              Icon(icon, size: 17, color: iconColor),
               const SizedBox(width: 5),
               Text(
-                hasExtraFilter ? '筛选中' : '筛选',
+                label,
                 style: TextStyle(
-                  color: hasExtraFilter ? _greenColor : _textColor,
+                  color: textColor,
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                 ),
@@ -3274,6 +3308,58 @@ class CatPawPrimaryButton extends StatelessWidget {
   }
 }
 
+class OutlineFixedActionButton extends StatelessWidget {
+  const OutlineFixedActionButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onPressed,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: _primaryColor, width: 1),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: _primaryColor, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: _primaryColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class CatWhiskerMark extends StatelessWidget {
   const CatWhiskerMark({super.key});
 
@@ -3318,7 +3404,10 @@ class CatWhiskerPainter extends CustomPainter {
 }
 
 String monthCompareText(double current, double previous) {
-  if (previous == 0) return '较上月 新增';
+  if (previous == 0) {
+    if (current == 0) return '暂无对比';
+    return '较上月 新增';
+  }
   final diff = (current - previous) / previous.abs() * 100;
   final sign = diff >= 0 ? '+' : '';
   return '较上月 $sign${diff.toStringAsFixed(1)}%';
@@ -4292,10 +4381,9 @@ class _ExpenseTrendCardState extends State<ExpenseTrendCard> {
   Widget build(BuildContext context) {
     final typeLabel = recordTypeLabel(widget.type);
     final points = widget.points;
-    final activeDays = points
-        .where((point) => point.amountFor(widget.type) > 0)
-        .length;
-    final average = activeDays == 0 ? 0.0 : widget.total / activeDays;
+    final average = widget.recordCount == 0
+        ? 0.0
+        : widget.total / widget.recordCount;
 
     return ReportCard(
       title: '$typeLabel趋势',
@@ -5226,22 +5314,21 @@ class CategoryBudgetSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final budgets = [...store.categoryBudgets]
-      ..sort((a, b) => a.category.compareTo(b.category));
+      ..sort((a, b) {
+        final limitCompare = b.limit.compareTo(a.limit);
+        if (limitCompare != 0) return limitCompare;
+        return a.category.compareTo(b.category);
+      });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
             const Expanded(child: SectionTitle(title: '分类预算')),
-            TextButton.icon(
-              onPressed: () => openCategoryBudgetEditor(context),
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('添加分类'),
-              style: TextButton.styleFrom(
-                foregroundColor: _textColor,
-                backgroundColor: const Color(0xFFFFF0B8),
-                shape: const StadiumBorder(),
-              ),
+            PillActionButton(
+              icon: Icons.add_rounded,
+              label: '添加分类',
+              onTap: () => openCategoryBudgetEditor(context),
             ),
           ],
         ),
@@ -5256,9 +5343,12 @@ class CategoryBudgetSection extends StatelessWidget {
             return CategoryBudgetTile(
               budget: budget,
               spent: spent,
-              onEdit: () => openCategoryBudgetEditor(context, budget: budget),
-              onDelete: () =>
-                  confirmDeleteCategoryBudget(context, store, budget),
+              onTap: () => Navigator.push(
+                context,
+                appPageRoute(
+                  (_) => CategoryBudgetRecordsPage(budgetId: budget.id),
+                ),
+              ),
             );
           }),
       ],
@@ -5349,14 +5439,12 @@ class CategoryBudgetTile extends StatelessWidget {
     super.key,
     required this.budget,
     required this.spent,
-    required this.onEdit,
-    required this.onDelete,
+    required this.onTap,
   });
 
   final CategoryBudget budget;
   final double spent;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -5364,86 +5452,274 @@ class CategoryBudgetTile extends StatelessWidget {
         ? 0.0
         : (spent / budget.limit).clamp(0, 1).toDouble();
     final left = budget.limit - spent;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: whiteCardDecoration(),
-      child: Stack(
-        children: [
-          Positioned(
-            right: 30,
-            top: -2,
-            child: CatPawMark(
-              size: 18,
-              color: _primaryColor.withValues(alpha: 0.12),
-            ),
-          ),
-          Row(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: whiteCardDecoration(),
+          child: Stack(
             children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: _softColor,
-                child: CategoryIconView(
-                  category: budget.category,
-                  icon: budget.icon,
-                  size: 24,
+              Positioned(
+                right: 30,
+                top: -2,
+                child: CatPawMark(
+                  size: 18,
+                  color: _primaryColor.withValues(alpha: 0.12),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: _softColor,
+                    child: CategoryIconView(
+                      category: budget.category,
+                      icon: budget.icon,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Text(
-                            budget.category,
-                            style: const TextStyle(
-                              color: _textColor,
-                              fontWeight: FontWeight.bold,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                budget.category,
+                                style: const TextStyle(
+                                  color: _textColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
-                          ),
+                            Text(
+                              '剩余 ${money(left)}',
+                              style: TextStyle(
+                                color: left >= 0 ? _mutedColor : _primaryColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: ratio,
+                          minHeight: 8,
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(8),
+                          ),
+                          backgroundColor: _softColor,
+                          color: left >= 0 ? _accentColor : _primaryColor,
+                        ),
+                        const SizedBox(height: 6),
                         Text(
-                          '剩余 ${money(left)}',
-                          style: TextStyle(
-                            color: left >= 0 ? _mutedColor : _primaryColor,
-                            fontWeight: FontWeight.w600,
+                          '猫爪已用 ${money(spent)} / 预算 ${money(budget.limit)}',
+                          style: const TextStyle(
+                            color: _mutedColor,
+                            fontSize: 12,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: ratio,
-                      minHeight: 8,
-                      borderRadius: const BorderRadius.all(Radius.circular(8)),
-                      backgroundColor: _softColor,
-                      color: left >= 0 ? _accentColor : _primaryColor,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '猫爪已用 ${money(spent)} / 预算 ${money(budget.limit)}',
-                      style: const TextStyle(color: _mutedColor, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_horiz_rounded, color: _mutedColor),
-                onSelected: (value) {
-                  if (value == 'edit') onEdit();
-                  if (value == 'delete') onDelete();
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'edit', child: Text('编辑')),
-                  PopupMenuItem(value: 'delete', child: Text('删除')),
+                  ),
                 ],
               ),
             ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class CategoryBudgetRecordsPage extends StatelessWidget {
+  const CategoryBudgetRecordsPage({super.key, required this.budgetId});
+
+  final String budgetId;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = AppScope.of(context);
+    final budget = store.categoryBudgetById(budgetId);
+    if (budget == null) {
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          centerTitle: true,
+          title: const Text('分类账单'),
+        ),
+        body: const Center(
+          child: Text('这个分类预算已经不存在了', style: TextStyle(color: _mutedColor)),
+        ),
+      );
+    }
+
+    final records = store.currentMonthRecords
+        .where(
+          (record) =>
+              record.type == RecordType.expense &&
+              record.category == budget.category,
+        )
+        .toList();
+    final spent = records.fold<double>(0, (sum, record) => sum + record.amount);
+    final left = budget.limit - spent;
+    final ratio = budget.limit <= 0
+        ? 0.0
+        : (spent / budget.limit).clamp(0, 1).toDouble();
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+        title: Text('${budget.category}预算'),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 132),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: whiteCardDecoration(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 26,
+                        backgroundColor: _softColor,
+                        child: CategoryIconView(
+                          category: budget.category,
+                          icon: budget.icon,
+                          size: 26,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              budget.category,
+                              style: const TextStyle(
+                                color: _textColor,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${formatYearMonth(DateTime.now())}分类预算',
+                              style: const TextStyle(
+                                color: _mutedColor,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: MiniMetric(title: '已支出', value: money(spent)),
+                      ),
+                      Expanded(
+                        child: MiniMetric(
+                          title: '预算',
+                          value: money(budget.limit),
+                        ),
+                      ),
+                      Expanded(
+                        child: MiniMetric(
+                          title: left >= 0 ? '剩余' : '超出',
+                          value: money(left.abs()),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  LinearProgressIndicator(
+                    value: ratio,
+                    minHeight: 10,
+                    borderRadius: const BorderRadius.all(Radius.circular(10)),
+                    backgroundColor: _softColor,
+                    color: left >= 0 ? _accentColor : _primaryColor,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            SectionTitle(title: '本月${budget.category}账单'),
+            const SizedBox(height: 12),
+            if (records.isEmpty)
+              EmptyState(
+                icon: Icons.receipt_long_rounded,
+                title:
+                    '${formatYearMonth(DateTime.now())}还没有${budget.category}账单',
+                subtitle: '去「记账」页添加这一类支出吧',
+              )
+            else
+              RecordGroupList(records: records),
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+          decoration: BoxDecoration(
+            color: _bgColor.withValues(alpha: 0.96),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.brown.withValues(alpha: 0.06),
+                blurRadius: 18,
+                offset: const Offset(0, -8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlineFixedActionButton(
+                  onPressed: () =>
+                      openCategoryBudgetEditor(context, budget: budget),
+                  icon: Icons.edit_rounded,
+                  label: '编辑',
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlineFixedActionButton(
+                  onPressed: () => confirmDeleteCategoryBudget(
+                    context,
+                    store,
+                    budget,
+                    popAfterDelete: true,
+                  ),
+                  icon: Icons.delete_rounded,
+                  label: '删除',
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
