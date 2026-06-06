@@ -787,6 +787,10 @@ const expenseCategories = [
   CategoryOption('追星', Icons.star_rounded),
   CategoryOption('麻将', Icons.casino_rounded),
   CategoryOption('房租', Icons.apartment_rounded),
+  CategoryOption('借出', Icons.call_made_rounded),
+  CategoryOption('钓鱼', Icons.phishing_rounded),
+  CategoryOption('美容', Icons.spa_rounded),
+  CategoryOption('烟酒', Icons.liquor_rounded),
   CategoryOption('医疗', Icons.local_hospital_rounded),
   CategoryOption('学习', Icons.menu_book_rounded),
   CategoryOption('运动', Icons.fitness_center_rounded),
@@ -797,7 +801,7 @@ const expenseCategories = [
   CategoryOption('数码', Icons.devices_rounded),
   CategoryOption('红包', Icons.payments_rounded),
   CategoryOption('还款', Icons.credit_card_rounded),
-  CategoryOption('公益', Icons.favorite_rounded),
+  CategoryOption('公益', Icons.volunteer_activism_rounded),
   CategoryOption('维修', Icons.build_circle_rounded),
   CategoryOption('礼物', Icons.card_giftcard_rounded),
   CategoryOption('住房', Icons.home_work_rounded),
@@ -882,6 +886,14 @@ Color categoryAccentColor(String category) {
       return const Color(0xFF47B98A);
     case '房租':
       return const Color(0xFFFF9960);
+    case '借出':
+      return const Color(0xFF6EA8FF);
+    case '钓鱼':
+      return const Color(0xFF46B6C8);
+    case '美容':
+      return const Color(0xFFFF77B7);
+    case '烟酒':
+      return const Color(0xFF9A88FF);
     case '医疗':
       return const Color(0xFFFF5D78);
     case '学习':
@@ -3495,6 +3507,7 @@ class _AddRecordPageState extends State<AddRecordPage> {
           photoDataUris: photoDataUris,
           selectedDate: selectedDate,
           onPickDate: _pickDate,
+          onPickTime: _pickTime,
           onAddPhoto: _addPhotos,
           onRemovePhoto: _removePhoto,
           onSave: () => _saveRecord(selectedCategory),
@@ -3526,8 +3539,26 @@ class _AddRecordPageState extends State<AddRecordPage> {
         date.year,
         date.month,
         date.day,
-        DateTime.now().hour,
-        DateTime.now().minute,
+        selectedDate.hour,
+        selectedDate.minute,
+      );
+    });
+  }
+
+  Future<void> _pickTime() async {
+    final time = await showWheelTimePicker(
+      context,
+      initialTime: TimeOfDay.fromDateTime(selectedDate),
+      title: '记账时间',
+    );
+    if (time == null) return;
+    setState(() {
+      selectedDate = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        time.hour,
+        time.minute,
       );
     });
   }
@@ -3685,6 +3716,7 @@ class RecordBottomPanel extends StatelessWidget {
     required this.photoDataUris,
     required this.selectedDate,
     required this.onPickDate,
+    required this.onPickTime,
     required this.onAddPhoto,
     required this.onRemovePhoto,
     required this.onSave,
@@ -3695,6 +3727,7 @@ class RecordBottomPanel extends StatelessWidget {
   final List<String> photoDataUris;
   final DateTime selectedDate;
   final VoidCallback onPickDate;
+  final VoidCallback onPickTime;
   final VoidCallback onAddPhoto;
   final ValueChanged<int> onRemovePhoto;
   final VoidCallback onSave;
@@ -3719,11 +3752,26 @@ class RecordBottomPanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            InputLikeTile(
-              icon: Icons.calendar_month_rounded,
-              title: '日期',
-              value: formatDate(selectedDate),
-              onTap: onPickDate,
+            Row(
+              children: [
+                Expanded(
+                  child: RecordDateTimeButton(
+                    icon: Icons.calendar_month_rounded,
+                    title: '日期',
+                    value: formatDate(selectedDate),
+                    onTap: onPickDate,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: RecordDateTimeButton(
+                    icon: Icons.access_time_rounded,
+                    title: '时间',
+                    value: formatTime(selectedDate),
+                    onTap: onPickTime,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Container(
@@ -3780,6 +3828,230 @@ class RecordBottomPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+class RecordDateTimeButton extends StatelessWidget {
+  const RecordDateTimeButton({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 58),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: whiteCardDecoration(),
+          child: Row(
+            children: [
+              Icon(icon, color: _primaryColor, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFB48A7C),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFFB48A7C),
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<TimeOfDay?> showWheelTimePicker(
+  BuildContext context, {
+  required TimeOfDay initialTime,
+  String title = '选择时间',
+}) async {
+  var selectedHour = initialTime.hour;
+  var selectedMinute = initialTime.minute;
+  return showModalBottomSheet<TimeOfDay>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (context, setSheetState) {
+          return SafeArea(
+            top: false,
+            child: Container(
+              height: 328,
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFFBF8),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _primaryColor.withValues(alpha: 0.26),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        child: const Text(
+                          '取消',
+                          style: TextStyle(color: _mutedColor),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              color: _textColor,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(
+                          sheetContext,
+                          TimeOfDay(hour: selectedHour, minute: selectedMinute),
+                        ),
+                        child: const Text(
+                          '确定',
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF3F5),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: CupertinoPicker.builder(
+                              scrollController: FixedExtentScrollController(
+                                initialItem: selectedHour,
+                              ),
+                              itemExtent: 42,
+                              selectionOverlay:
+                                  const CupertinoPickerDefaultSelectionOverlay(
+                                    background: Color(0x55FFFFFF),
+                                  ),
+                              onSelectedItemChanged: (index) {
+                                setSheetState(() => selectedHour = index);
+                              },
+                              childCount: 24,
+                              itemBuilder: (context, index) => Center(
+                                child: Text(
+                                  twoDigits(index),
+                                  style: const TextStyle(
+                                    color: _textColor,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const Text(
+                            ':',
+                            style: TextStyle(
+                              color: _mutedColor,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Expanded(
+                            child: CupertinoPicker.builder(
+                              scrollController: FixedExtentScrollController(
+                                initialItem: selectedMinute,
+                              ),
+                              itemExtent: 42,
+                              selectionOverlay:
+                                  const CupertinoPickerDefaultSelectionOverlay(
+                                    background: Color(0x55FFFFFF),
+                                  ),
+                              onSelectedItemChanged: (index) {
+                                setSheetState(() => selectedMinute = index);
+                              },
+                              childCount: 60,
+                              itemBuilder: (context, index) => Center(
+                                child: Text(
+                                  twoDigits(index),
+                                  style: const TextStyle(
+                                    color: _textColor,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
 }
 
 class RecordPhotoStrip extends StatelessWidget {
@@ -6152,7 +6424,10 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   late final TextEditingController nicknameController;
   String? avatarDataUri;
+  String initialNickname = '';
+  String? initialAvatarDataUri;
   bool initialized = false;
+  bool allowPop = false;
 
   @override
   void initState() {
@@ -6167,6 +6442,8 @@ class _ProfilePageState extends State<ProfilePage> {
     final store = AppScope.of(context);
     nicknameController.text = store.profileNickname;
     avatarDataUri = store.profileAvatarDataUri;
+    initialNickname = store.profileNickname;
+    initialAvatarDataUri = store.profileAvatarDataUri;
     initialized = true;
   }
 
@@ -6178,103 +6455,156 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('个人信息'),
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        centerTitle: true,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 26),
-              decoration: whiteCardDecoration(),
-              child: Column(
-                children: [
-                  GestureDetector(
-                    onTap: pickAvatar,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        ProfileAvatar(avatarDataUri: avatarDataUri, size: 96),
-                        Positioned(
-                          right: -4,
-                          bottom: -4,
-                          child: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              color: _primaryColor,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 3),
-                            ),
-                            child: const Icon(
-                              Icons.photo_camera_rounded,
-                              color: Colors.white,
-                              size: 18,
+    return PopScope(
+      canPop: allowPop,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        confirmLeaveIfNeeded();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: confirmLeaveIfNeeded,
+          ),
+          title: const Text('个人信息'),
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          centerTitle: true,
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 26),
+                decoration: whiteCardDecoration(),
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: pickAvatar,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ProfileAvatar(avatarDataUri: avatarDataUri, size: 96),
+                          Positioned(
+                            right: -4,
+                            bottom: -4,
+                            child: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: _primaryColor,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 3,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.photo_camera_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextButton(
-                    onPressed: pickAvatar,
-                    child: const Text(
-                      '更换头像',
-                      style: TextStyle(
-                        color: _primaryColor,
-                        fontWeight: FontWeight.bold,
+                        ],
                       ),
                     ),
-                  ),
-                  if (avatarDataUri != null)
+                    const SizedBox(height: 14),
                     TextButton(
-                      onPressed: () => setState(() => avatarDataUri = null),
+                      onPressed: pickAvatar,
                       child: const Text(
-                        '恢复默认头像',
+                        '更换头像',
                         style: TextStyle(
-                          color: _mutedColor,
+                          color: _primaryColor,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              decoration: whiteCardDecoration(),
-              child: TextField(
-                controller: nicknameController,
-                maxLength: 12,
-                decoration: const InputDecoration(
-                  counterText: '',
-                  border: InputBorder.none,
-                  icon: Icon(Icons.badge_rounded, color: _primaryColor),
-                  labelText: '昵称',
-                  labelStyle: TextStyle(color: _mutedColor),
-                  hintText: '请输入昵称',
-                ),
-                style: const TextStyle(
-                  color: _textColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+                    if (avatarDataUri != null)
+                      TextButton(
+                        onPressed: () => setState(() => avatarDataUri = null),
+                        child: const Text(
+                          '恢复默认头像',
+                          style: TextStyle(
+                            color: _mutedColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 28),
-            CatPawPrimaryButton(label: '保存修改', onPressed: saveProfile),
-          ],
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                decoration: whiteCardDecoration(),
+                child: TextField(
+                  controller: nicknameController,
+                  maxLength: 12,
+                  decoration: const InputDecoration(
+                    counterText: '',
+                    border: InputBorder.none,
+                    icon: Icon(Icons.badge_rounded, color: _primaryColor),
+                    labelText: '昵称',
+                    labelStyle: TextStyle(color: _mutedColor),
+                    hintText: '请输入昵称',
+                  ),
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 28),
+              CatPawPrimaryButton(label: '保存修改', onPressed: saveProfile),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  bool get hasUnsavedChanges {
+    return nicknameController.text.trim() != initialNickname ||
+        avatarDataUri != initialAvatarDataUri;
+  }
+
+  Future<void> confirmLeaveIfNeeded() async {
+    if (!hasUnsavedChanges) {
+      allowPop = true;
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('有未保存的修改'),
+          content: const Text('昵称或头像还没有保存，确定要离开吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('继续编辑'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('不保存离开'),
+            ),
+          ],
+        );
+      },
+    );
+    if (discard == true && mounted) {
+      allowPop = true;
+      Navigator.pop(context);
+    }
   }
 
   Future<void> pickAvatar() async {
@@ -6305,6 +6635,7 @@ class _ProfilePageState extends State<ProfilePage> {
       context,
     ).updateProfile(nickname: nickname, avatar: avatarDataUri);
     if (!mounted) return;
+    allowPop = true;
     showToast(context, '个人信息已保存');
     Navigator.pop(context);
   }
@@ -7770,6 +8101,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
             photoDataUris: photoDataUris,
             selectedDate: selectedDate,
             onPickDate: _pickDate,
+            onPickTime: _pickTime,
             onAddPhoto: _addPhotos,
             onRemovePhoto: _removePhoto,
             onSave: () => _saveRecord(existingRecord, selectedCategory),
@@ -7804,6 +8136,24 @@ class _EditRecordPageState extends State<EditRecordPage> {
         date.day,
         selectedDate.hour,
         selectedDate.minute,
+      );
+    });
+  }
+
+  Future<void> _pickTime() async {
+    final time = await showWheelTimePicker(
+      context,
+      initialTime: TimeOfDay.fromDateTime(selectedDate),
+      title: '记账时间',
+    );
+    if (time == null) return;
+    setState(() {
+      selectedDate = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        time.hour,
+        time.minute,
       );
     });
   }
