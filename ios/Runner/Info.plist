@@ -61,5 +61,9 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于选择头像照片。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于将导出的账单图片保存到相册。</string>
 </dict>
 </plist>

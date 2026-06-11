@@ -1,10 +1,14 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6355,6 +6359,16 @@ class MinePage extends StatelessWidget {
             onTap: () => showAchievementDialog(context, store),
           ),
           MineTile(
+            icon: Icons.file_upload_rounded,
+            title: '导出账单',
+            onTap: () {
+              Navigator.push(
+                context,
+                appPageRoute((_) => const ExportBillPage()),
+              );
+            },
+          ),
+          MineTile(
             icon: Icons.info_rounded,
             title: '关于我们',
             onTap: () {
@@ -7111,6 +7125,1107 @@ class ReminderSettingRow extends StatelessWidget {
             ),
           ),
           trailing,
+        ],
+      ),
+    );
+  }
+}
+
+class ExportBillPage extends StatefulWidget {
+  const ExportBillPage({super.key});
+
+  @override
+  State<ExportBillPage> createState() => _ExportBillPageState();
+}
+
+class _ExportBillPageState extends State<ExportBillPage> {
+  DateTime selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  int rangeMonths = 1;
+  String exportFormat = 'PNG';
+  bool includeName = true;
+  bool includeTime = true;
+  bool includeAmount = true;
+  bool includeNote = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = AppScope.of(context);
+    final periodStart = rangeMonths == 3
+        ? DateTime(selectedMonth.year, selectedMonth.month - 2)
+        : selectedMonth;
+    final periodEnd = DateTime(selectedMonth.year, selectedMonth.month + 1);
+    final records =
+        store.records
+            .where(
+              (record) =>
+                  !record.date.isBefore(periodStart) &&
+                  record.date.isBefore(periodEnd),
+            )
+            .toList()
+          ..sort((a, b) => b.date.compareTo(a.date));
+    final expense = records
+        .where((record) => record.type == RecordType.expense)
+        .fold<double>(0, (sum, record) => sum + record.amount);
+    final income = records
+        .where((record) => record.type == RecordType.income)
+        .fold<double>(0, (sum, record) => sum + record.amount);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('导出账单'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ExportSectionCard(
+              icon: Icons.calendar_month_rounded,
+              title: '选择导出月份',
+              child: Column(
+                children: [
+                  Container(
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: _primaryColor.withValues(alpha: 0.28),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => shiftMonth(-1),
+                          icon: const Icon(
+                            Icons.chevron_left_rounded,
+                            color: Color(0xFFB48A7C),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            exportPeriodTitle(periodStart, selectedMonth),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: _textColor,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => shiftMonth(1),
+                          icon: const Icon(
+                            Icons.chevron_right_rounded,
+                            color: Color(0xFFE8A1A4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ExportQuickButton(
+                          label: '本月',
+                          selected:
+                              rangeMonths == 1 &&
+                              selectedMonth.year == DateTime.now().year &&
+                              selectedMonth.month == DateTime.now().month,
+                          onTap: () => setState(() {
+                            final now = DateTime.now();
+                            selectedMonth = DateTime(now.year, now.month);
+                            rangeMonths = 1;
+                          }),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ExportQuickButton(
+                          label: '上月',
+                          selected:
+                              rangeMonths == 1 &&
+                              selectedMonth.year ==
+                                  DateTime(
+                                    DateTime.now().year,
+                                    DateTime.now().month - 1,
+                                  ).year &&
+                              selectedMonth.month ==
+                                  DateTime(
+                                    DateTime.now().year,
+                                    DateTime.now().month - 1,
+                                  ).month,
+                          onTap: () => setState(() {
+                            final now = DateTime.now();
+                            selectedMonth = DateTime(now.year, now.month - 1);
+                            rangeMonths = 1;
+                          }),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ExportQuickButton(
+                          label: '最近3个月',
+                          selected: rangeMonths == 3,
+                          onTap: () => setState(() {
+                            final now = DateTime.now();
+                            selectedMonth = DateTime(now.year, now.month);
+                            rangeMonths = 3;
+                          }),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ExportSectionCard(
+              icon: Icons.assignment_turned_in_rounded,
+              title: '导出内容',
+              child: Column(
+                children: [
+                  ExportCheckRow(
+                    title: '账单名称',
+                    icon: Icons.pets_rounded,
+                    value: includeName,
+                    onChanged: (value) => setState(() => includeName = value),
+                  ),
+                  ExportCheckRow(
+                    title: '记录时间',
+                    icon: Icons.calendar_month_rounded,
+                    value: includeTime,
+                    onChanged: (value) => setState(() => includeTime = value),
+                  ),
+                  ExportCheckRow(
+                    title: '花费金额',
+                    icon: Icons.monetization_on_rounded,
+                    value: includeAmount,
+                    onChanged: (value) => setState(() => includeAmount = value),
+                  ),
+                  ExportCheckRow(
+                    title: '账单备注',
+                    icon: Icons.chat_bubble_outline_rounded,
+                    value: includeNote,
+                    onChanged: (value) => setState(() => includeNote = value),
+                    showDivider: false,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ExportSectionCard(
+              icon: Icons.description_rounded,
+              title: '导出格式',
+              child: Row(
+                children: [
+                  for (final item in const ['PNG', 'JPG', 'PDF']) ...[
+                    Expanded(
+                      child: ExportFormatButton(
+                        label: item,
+                        selected: exportFormat == item,
+                        onTap: () => setState(() => exportFormat = item),
+                      ),
+                    ),
+                    if (item != 'PDF') const SizedBox(width: 12),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ExportSectionCard(
+              icon: Icons.visibility_rounded,
+              title: '导出预览',
+              child: ExportPreviewTicket(
+                periodLabel: exportPeriodSubtitle(periodStart, selectedMonth),
+                expense: expense,
+                income: income,
+                count: records.length,
+                exportFormat: exportFormat,
+              ),
+            ),
+            const SizedBox(height: 20),
+            CatPawPrimaryButton(
+              label: exportFormat == 'PDF' ? '生成账单PDF' : '生成账单图片',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  appPageRoute(
+                    (_) => ExportBillPreviewPage(
+                      periodLabel: exportPeriodSubtitle(
+                        periodStart,
+                        selectedMonth,
+                      ),
+                      records: records,
+                      expense: expense,
+                      income: income,
+                      exportFormat: exportFormat,
+                      includeName: includeName,
+                      includeTime: includeTime,
+                      includeAmount: includeAmount,
+                      includeNote: includeNote,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+            MineTile(
+              icon: Icons.input_rounded,
+              title: '导入账单',
+              onTap: () => showToast(context, '导入账单功能待开启'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void shiftMonth(int value) {
+    setState(() {
+      selectedMonth = DateTime(selectedMonth.year, selectedMonth.month + value);
+    });
+  }
+}
+
+class ExportSectionCard extends StatelessWidget {
+  const ExportSectionCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.child,
+  });
+
+  final IconData icon;
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: whiteCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: _primaryColor, size: 24),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: _textColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class ExportQuickButton extends StatelessWidget {
+  const ExportQuickButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: selected ? _primaryColor : _textColor,
+        side: BorderSide(
+          color: selected ? _primaryColor : _mutedColor.withValues(alpha: 0.24),
+        ),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(vertical: 13),
+      ),
+      child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
+class ExportCheckRow extends StatelessWidget {
+  const ExportCheckRow({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.value,
+    required this.onChanged,
+    this.showDivider = true,
+  });
+
+  final String title;
+  final IconData icon;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: value
+                        ? _primaryColor
+                        : _primaryColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    value ? Icons.check_rounded : Icons.remove_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Icon(icon, color: _primaryColor.withValues(alpha: 0.72)),
+              ],
+            ),
+          ),
+          if (showDivider)
+            Divider(
+              height: 1,
+              color: _primaryColor.withValues(alpha: 0.12),
+              indent: 44,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class ExportFormatButton extends StatelessWidget {
+  const ExportFormatButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.52),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected
+                ? _primaryColor
+                : _mutedColor.withValues(alpha: 0.22),
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    label == 'PDF'
+                        ? Icons.description_rounded
+                        : Icons.image_rounded,
+                    color: selected ? _primaryColor : _mutedColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? _primaryColor : _textColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              const Positioned(
+                right: -8,
+                top: -8,
+                child: CircleAvatar(
+                  radius: 13,
+                  backgroundColor: _primaryColor,
+                  child: Icon(
+                    Icons.check_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ExportPreviewTicket extends StatelessWidget {
+  const ExportPreviewTicket({
+    super.key,
+    required this.periodLabel,
+    required this.expense,
+    required this.income,
+    required this.count,
+    required this.exportFormat,
+  });
+
+  final String periodLabel;
+  final double expense;
+  final double income;
+  final int count;
+  final String exportFormat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBF8),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: _primaryColor.withValues(alpha: 0.22),
+          style: BorderStyle.solid,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.asset(
+                  'assets/images/app_icon.png',
+                  width: 42,
+                  height: 42,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '喵喵记账',
+                      style: TextStyle(
+                        color: _textColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      '$periodLabel账单',
+                      style: const TextStyle(color: _mutedColor),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                exportFormat,
+                style: const TextStyle(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ExportSummaryLine(label: '收支总览', value: '支出 ${money(expense)}'),
+          ExportSummaryLine(label: '收入合计', value: money(income)),
+          ExportSummaryLine(label: '记录笔数', value: '共 $count 笔'),
+          ExportSummaryLine(
+            label: '导出时间',
+            value:
+                '${formatDate(DateTime.now())} ${formatTime(DateTime.now())}',
+            showDivider: false,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ExportSummaryLine extends StatelessWidget {
+  const ExportSummaryLine({
+    super.key,
+    required this.label,
+    required this.value,
+    this.showDivider = true,
+  });
+
+  final String label;
+  final String value;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        if (showDivider)
+          Divider(color: _primaryColor.withValues(alpha: 0.14), height: 1),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          child: Row(
+            children: [
+              Text(label, style: const TextStyle(color: _textColor)),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class ExportBillPreviewPage extends StatefulWidget {
+  const ExportBillPreviewPage({
+    super.key,
+    required this.periodLabel,
+    required this.records,
+    required this.expense,
+    required this.income,
+    required this.exportFormat,
+    required this.includeName,
+    required this.includeTime,
+    required this.includeAmount,
+    required this.includeNote,
+  });
+
+  final String periodLabel;
+  final List<AccountRecord> records;
+  final double expense;
+  final double income;
+  final String exportFormat;
+  final bool includeName;
+  final bool includeTime;
+  final bool includeAmount;
+  final bool includeNote;
+
+  @override
+  State<ExportBillPreviewPage> createState() => _ExportBillPreviewPageState();
+}
+
+class _ExportBillPreviewPageState extends State<ExportBillPreviewPage> {
+  final GlobalKey previewKey = GlobalKey();
+  bool saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final sortedRecords = [...widget.records]
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final groups = <DateTime, List<AccountRecord>>{};
+    for (final record in sortedRecords) {
+      final day = DateTime(
+        record.date.year,
+        record.date.month,
+        record.date.day,
+      );
+      groups.putIfAbsent(day, () => []).add(record);
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('账单图片预览'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            RepaintBoundary(
+              key: previewKey,
+              child: Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBF8),
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(
+                    color: _primaryColor.withValues(alpha: 0.18),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _primaryColor.withValues(alpha: 0.08),
+                      blurRadius: 22,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.asset(
+                            'assets/images/app_icon.png',
+                            width: 54,
+                            height: 54,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (widget.includeName)
+                                const Text(
+                                  '喵喵记账',
+                                  style: TextStyle(
+                                    color: _textColor,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              Text(
+                                '${widget.periodLabel}账单',
+                                style: const TextStyle(
+                                  color: _mutedColor,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _primaryColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            widget.exportFormat,
+                            style: const TextStyle(
+                              color: _primaryColor,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _softColor.withValues(alpha: 0.62),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ExportPreviewMetric(
+                              label: '支出',
+                              value: money(widget.expense),
+                              color: _primaryColor,
+                            ),
+                          ),
+                          Expanded(
+                            child: ExportPreviewMetric(
+                              label: '收入',
+                              value: money(widget.income),
+                              color: _greenColor,
+                            ),
+                          ),
+                          Expanded(
+                            child: ExportPreviewMetric(
+                              label: '笔数',
+                              value: '${widget.records.length}笔',
+                              color: _textColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.pets_rounded,
+                          color: _primaryColor,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          '本期明细',
+                          style: TextStyle(
+                            color: _textColor,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (widget.includeTime)
+                          Text(
+                            '导出 ${formatDate(DateTime.now())} ${formatTime(DateTime.now())}',
+                            style: const TextStyle(
+                              color: Color(0xFFB8AAA4),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (widget.records.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 34),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.62),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          '这个时间段还没有账单',
+                          style: TextStyle(
+                            color: _mutedColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      )
+                    else
+                      ...groups.entries.map(
+                        (entry) => ExportPreviewRecordGroup(
+                          day: entry.key,
+                          records: entry.value,
+                          includeTime: widget.includeTime,
+                          includeAmount: widget.includeAmount,
+                          includeNote: widget.includeNote,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            CatPawPrimaryButton(
+              label: saving ? '保存中...' : '保存到相册',
+              onPressed: saving ? () {} : savePreviewToGallery,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> savePreviewToGallery() async {
+    if (kIsWeb) {
+      showToast(context, '网页预览不能直接保存到手机，请在手机App中使用');
+      return;
+    }
+    setState(() => saving = true);
+    try {
+      final boundary =
+          previewKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+      if (boundary == null) {
+        throw StateError('preview boundary missing');
+      }
+      final image = await boundary.toImage(pixelRatio: 3);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        throw StateError('image bytes missing');
+      }
+      final bytes = byteData.buffer.asUint8List();
+      final hasAccess = await Gal.hasAccess();
+      if (!hasAccess) {
+        await Gal.requestAccess();
+      }
+      await Gal.putImageBytes(
+        bytes,
+        name:
+            '喵记账_${widget.periodLabel}_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      if (mounted) showToast(context, '账单图片已保存到相册');
+    } catch (_) {
+      if (mounted) showToast(context, '保存失败，请检查相册权限后再试');
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+}
+
+class ExportPreviewMetric extends StatelessWidget {
+  const ExportPreviewMetric({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: _mutedColor,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: color,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class ExportPreviewRecordGroup extends StatelessWidget {
+  const ExportPreviewRecordGroup({
+    super.key,
+    required this.day,
+    required this.records,
+    required this.includeTime,
+    required this.includeAmount,
+    required this.includeNote,
+  });
+
+  final DateTime day;
+  final List<AccountRecord> records;
+  final bool includeTime;
+  final bool includeAmount;
+  final bool includeNote;
+
+  @override
+  Widget build(BuildContext context) {
+    final expenseTotal = records
+        .where((record) => record.type == RecordType.expense)
+        .fold<double>(0, (sum, record) => sum + record.amount);
+    final incomeTotal = records
+        .where((record) => record.type == RecordType.income)
+        .fold<double>(0, (sum, record) => sum + record.amount);
+    final summaries = [
+      if (expenseTotal > 0) '支出 ${money(expenseTotal)}',
+      if (incomeTotal > 0) '收入 ${money(incomeTotal)}',
+    ].join('  ');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _primaryColor.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: _primaryColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${formatMonthDay(day)}  星期${weekdayLabel(day.weekday)}',
+                style: const TextStyle(
+                  color: Color(0xFFAFA5A0),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  summaries,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFAFA5A0),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...records.map(
+            (record) => ExportPreviewRecordRow(
+              record: record,
+              includeTime: includeTime,
+              includeAmount: includeAmount,
+              includeNote: includeNote,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ExportPreviewRecordRow extends StatelessWidget {
+  const ExportPreviewRecordRow({
+    super.key,
+    required this.record,
+    required this.includeTime,
+    required this.includeAmount,
+    required this.includeNote,
+  });
+
+  final AccountRecord record;
+  final bool includeTime;
+  final bool includeAmount;
+  final bool includeNote;
+
+  @override
+  Widget build(BuildContext context) {
+    final isIncome = record.type == RecordType.income;
+    final note = record.note.trim();
+    final details = [
+      if (includeTime) formatTime(record.date),
+      if (includeNote && note.isNotEmpty) note,
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBF8),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFFEBD7A9)),
+            ),
+            child: Center(
+              child: CategoryIconView(
+                category: record.category,
+                icon: record.icon,
+                size: 23,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  record.category,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    details.join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFAFA5A0),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (includeAmount) ...[
+            const SizedBox(width: 10),
+            Text(
+              '${isIncome ? '+' : '-'} ${money(record.amount)}',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                color: isIncome ? _greenColor : _textColor,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -9673,6 +10788,23 @@ String filterDateRangeLabel(HomeRecordFilter filter) {
 
 String formatYearMonth(DateTime date) {
   return '${date.year}年${date.month.toString().padLeft(2, '0')}月';
+}
+
+String exportPeriodTitle(DateTime start, DateTime endMonth) {
+  if (start.year == endMonth.year && start.month == endMonth.month) {
+    return '${endMonth.year}年${endMonth.month}月';
+  }
+  if (start.year == endMonth.year) {
+    return '${start.month}月-${endMonth.month}月';
+  }
+  return '${start.year}年${start.month}月-${endMonth.year}年${endMonth.month}月';
+}
+
+String exportPeriodSubtitle(DateTime start, DateTime endMonth) {
+  if (start.year == endMonth.year && start.month == endMonth.month) {
+    return '${endMonth.year}年${endMonth.month}月';
+  }
+  return '${start.year}年${start.month}月-${endMonth.year}年${endMonth.month}月';
 }
 
 String shortYearMonth(DateTime date) {
