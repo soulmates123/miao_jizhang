@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -11,8 +12,10 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'export_download.dart';
 import 'reminder_service.dart';
 
 Future<void> main() async {
@@ -222,6 +225,14 @@ class AppStore extends ChangeNotifier {
 
   Future<void> addRecord(AccountRecord record) async {
     records.insert(0, record);
+    records.sort((a, b) => b.date.compareTo(a.date));
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> addRecords(List<AccountRecord> importedRecords) async {
+    if (importedRecords.isEmpty) return;
+    records.addAll(importedRecords);
     records.sort((a, b) => b.date.compareTo(a.date));
     notifyListeners();
     await _save();
@@ -464,6 +475,16 @@ class AppStore extends ChangeNotifier {
       }
     }
     return streak == 0 ? uniqueDays.length : streak;
+  }
+
+  int get totalAccountingDays {
+    return records
+        .map(
+          (record) =>
+              DateTime(record.date.year, record.date.month, record.date.day),
+        )
+        .toSet()
+        .length;
   }
 
   double _sumCurrentMonth(RecordType type) {
@@ -818,7 +839,7 @@ const incomeCategories = [
   CategoryOption('卖闲置', Icons.sell_rounded),
   CategoryOption('工资', Icons.work_rounded),
   CategoryOption('兼职', Icons.storefront_rounded),
-  CategoryOption('奖金', Icons.emoji_events_rounded),
+  CategoryOption('年终奖', Icons.emoji_events_rounded),
   CategoryOption('理财', Icons.trending_up_rounded),
   CategoryOption('红包', Icons.payments_rounded),
   CategoryOption('报销', Icons.receipt_long_rounded),
@@ -828,7 +849,11 @@ const incomeCategories = [
   CategoryOption('借入', Icons.call_received_rounded),
   CategoryOption('还款', Icons.credit_score_rounded),
   CategoryOption('彩票', Icons.confirmation_number_rounded),
+  CategoryOption('娱乐', Icons.sports_esports_rounded),
   CategoryOption('麻将', Icons.casino_rounded),
+  CategoryOption('恋爱', Icons.favorite_border_rounded),
+  CategoryOption('奖学金', Icons.school_rounded),
+  CategoryOption('赔款', Icons.receipt_rounded),
   CategoryOption('其他', Icons.more_horiz_rounded),
 ];
 
@@ -847,6 +872,7 @@ String normalizeCategoryName(String category) {
   if (category == '育儿') return '水果';
   if (category == '人情') return '饮品';
   if (category == '保险') return '红包';
+  if (category == '奖金') return '年终奖';
   return category;
 }
 
@@ -934,7 +960,7 @@ Color categoryAccentColor(String category) {
       return const Color(0xFF5B8CFF);
     case '兼职':
       return const Color(0xFFFF8C4B);
-    case '奖金':
+    case '年终奖':
       return const Color(0xFFFFC23F);
     case '理财':
       return const Color(0xFF49B978);
@@ -952,6 +978,10 @@ Color categoryAccentColor(String category) {
       return const Color(0xFF6EA8FF);
     case '彩票':
       return const Color(0xFFFF8B55);
+    case '奖学金':
+      return const Color(0xFF6F8DFF);
+    case '赔款':
+      return const Color(0xFFFF7D63);
     default:
       return const Color(0xFFFF7F96);
   }
@@ -6324,11 +6354,6 @@ class MinePage extends StatelessWidget {
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '已经认真踩爪记账 ${store.accountingDays} 天',
-                              style: const TextStyle(color: _mutedColor),
-                            ),
                           ],
                         ),
                       ),
@@ -6341,6 +6366,12 @@ class MinePage extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 18),
+          MineStatsCard(
+            continuousDays: store.accountingDays,
+            totalDays: store.totalAccountingDays,
+            recordCount: store.records.length,
           ),
           const SizedBox(height: 18),
           MineTile(
@@ -6357,6 +6388,16 @@ class MinePage extends StatelessWidget {
             icon: Icons.emoji_events_rounded,
             title: '成就徽章',
             onTap: () => showAchievementDialog(context, store),
+          ),
+          MineTile(
+            icon: Icons.file_download_rounded,
+            title: '导入账单',
+            onTap: () {
+              Navigator.push(
+                context,
+                appPageRoute((_) => const ImportBillPage()),
+              );
+            },
           ),
           MineTile(
             icon: Icons.file_upload_rounded,
@@ -6383,6 +6424,110 @@ class MinePage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class MineStatsCard extends StatelessWidget {
+  const MineStatsCard({
+    super.key,
+    required this.continuousDays,
+    required this.totalDays,
+    required this.recordCount,
+  });
+
+  final int continuousDays;
+  final int totalDays;
+  final int recordCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      decoration: whiteCardDecoration(),
+      child: Row(
+        children: [
+          Expanded(
+            child: MineStatItem(
+              icon: Icons.local_fire_department_rounded,
+              label: '连续记账',
+              value: '$continuousDays天',
+              color: _primaryColor,
+            ),
+          ),
+          Expanded(
+            child: MineStatItem(
+              icon: Icons.calendar_month_rounded,
+              label: '累计记账',
+              value: '$totalDays天',
+              color: _accentColor,
+            ),
+          ),
+          Expanded(
+            child: MineStatItem(
+              icon: Icons.receipt_long_rounded,
+              label: '账单笔数',
+              value: '$recordCount笔',
+              color: _greenColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class MineStatItem extends StatelessWidget {
+  const MineStatItem({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.14),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: _textColor,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: _mutedColor,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -7131,6 +7276,314 @@ class ReminderSettingRow extends StatelessWidget {
   }
 }
 
+class ImportBillPage extends StatefulWidget {
+  const ImportBillPage({super.key});
+
+  @override
+  State<ImportBillPage> createState() => _ImportBillPageState();
+}
+
+class _ImportBillPageState extends State<ImportBillPage> {
+  List<AccountRecord> previewRecords = [];
+  String? fileName;
+  String? errorText;
+  bool importing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final expense = previewRecords
+        .where((record) => record.type == RecordType.expense)
+        .fold<double>(0, (sum, record) => sum + record.amount);
+    final income = previewRecords
+        .where((record) => record.type == RecordType.income)
+        .fold<double>(0, (sum, record) => sum + record.amount);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('导入账单'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ExportSectionCard(
+              icon: Icons.upload_file_rounded,
+              title: '选择账单文件',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    '支持 JSON / CSV / TXT。CSV 表头可用：类型、分类、金额、备注、时间。',
+                    style: TextStyle(
+                      color: _mutedColor,
+                      fontSize: 13,
+                      height: 1.45,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    onPressed: importing ? null : pickImportFile,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _primaryColor,
+                      side: BorderSide(
+                        color: _primaryColor.withValues(alpha: 0.5),
+                      ),
+                      shape: const StadiumBorder(),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    icon: const Icon(Icons.folder_open_rounded),
+                    label: Text(fileName == null ? '选择文件' : '重新选择文件'),
+                  ),
+                  if (fileName != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      fileName!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                  if (errorText != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      errorText!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: _primaryColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ExportSectionCard(
+              icon: Icons.receipt_long_rounded,
+              title: '导入预览',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ExportPreviewMetric(
+                          label: '支出',
+                          value: money(expense),
+                          color: _primaryColor,
+                        ),
+                      ),
+                      Expanded(
+                        child: ExportPreviewMetric(
+                          label: '收入',
+                          value: money(income),
+                          color: _greenColor,
+                        ),
+                      ),
+                      Expanded(
+                        child: ExportPreviewMetric(
+                          label: '笔数',
+                          value: '${previewRecords.length}笔',
+                          color: _textColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (previewRecords.isEmpty)
+                    Container(
+                      height: 160,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: _softColor.withValues(alpha: 0.58),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Text(
+                        '选择文件后，会在这里预览账单',
+                        style: TextStyle(
+                          color: _mutedColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    )
+                  else
+                    ...previewRecords
+                        .take(8)
+                        .map(
+                          (record) => ImportPreviewRecordRow(record: record),
+                        ),
+                  if (previewRecords.length > 8)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        '还有 ${previewRecords.length - 8} 笔将在确认后一起导入',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: _mutedColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            CatPawPrimaryButton(
+              label: importing ? '导入中...' : '确认导入',
+              onPressed: importing || previewRecords.isEmpty
+                  ? () {}
+                  : confirmImport,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> pickImportFile() async {
+    setState(() {
+      importing = true;
+      errorText = null;
+    });
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['json', 'csv', 'txt'],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) {
+        setState(() => importing = false);
+        return;
+      }
+      final file = result.files.single;
+      final bytes = file.bytes;
+      if (bytes == null) {
+        throw FormatException('文件读取失败，请换一个文件再试');
+      }
+      final text = utf8.decode(bytes, allowMalformed: true);
+      final parsed = parseImportedBillRecords(text);
+      if (parsed.isEmpty) {
+        throw FormatException('没有识别到账单记录');
+      }
+      setState(() {
+        fileName = file.name;
+        previewRecords = parsed;
+        errorText = null;
+        importing = false;
+      });
+    } on FormatException catch (error) {
+      setState(() {
+        previewRecords = [];
+        errorText = error.message;
+        importing = false;
+      });
+    } catch (_) {
+      setState(() {
+        previewRecords = [];
+        errorText = '导入失败，请确认文件格式是否正确';
+        importing = false;
+      });
+    }
+  }
+
+  Future<void> confirmImport() async {
+    if (previewRecords.isEmpty || importing) return;
+    setState(() => importing = true);
+    final store = AppScope.of(context);
+    final existingKeys = store.records.map(importDuplicateKey).toSet();
+    final recordsToImport = <AccountRecord>[];
+    var skippedCount = 0;
+    for (final record in previewRecords) {
+      final key = importDuplicateKey(record);
+      if (existingKeys.contains(key)) {
+        skippedCount++;
+      } else {
+        existingKeys.add(key);
+        recordsToImport.add(record);
+      }
+    }
+
+    await store.addRecords(recordsToImport);
+    if (!mounted) return;
+    if (recordsToImport.isEmpty) {
+      setState(() => importing = false);
+      showToast(context, '没有新账单，已跳过 $skippedCount 笔重复记录');
+      return;
+    }
+    showToast(
+      context,
+      skippedCount > 0
+          ? '已导入 ${recordsToImport.length} 笔，跳过 $skippedCount 笔重复记录'
+          : '已导入 ${recordsToImport.length} 笔账单',
+    );
+    Navigator.pop(context);
+  }
+}
+
+class ImportPreviewRecordRow extends StatelessWidget {
+  const ImportPreviewRecordRow({super.key, required this.record});
+
+  final AccountRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    final isIncome = record.type == RecordType.income;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _softColor.withValues(alpha: 0.46),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          CategoryIconView(category: record.category, icon: record.icon),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  record.category,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  [
+                    formatDate(record.date),
+                    formatTime(record.date),
+                    if (record.note.trim().isNotEmpty) record.note.trim(),
+                  ].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _mutedColor, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '${isIncome ? '+' : '-'} ${money(record.amount)}',
+            style: TextStyle(
+              color: isIncome ? _greenColor : _textColor,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ExportBillPage extends StatefulWidget {
   const ExportBillPage({super.key});
 
@@ -7321,19 +7774,26 @@ class _ExportBillPageState extends State<ExportBillPage> {
             ExportSectionCard(
               icon: Icons.description_rounded,
               title: '导出格式',
-              child: Row(
-                children: [
-                  for (final item in const ['PNG', 'JPG', 'PDF']) ...[
-                    Expanded(
-                      child: ExportFormatButton(
-                        label: item,
-                        selected: exportFormat == item,
-                        onTap: () => setState(() => exportFormat = item),
-                      ),
-                    ),
-                    if (item != 'PDF') const SizedBox(width: 12),
-                  ],
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  const gap = 12.0;
+                  final itemWidth = (constraints.maxWidth - gap) / 2;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      for (final item in const ['PNG', 'JSON', 'CSV', 'TXT'])
+                        SizedBox(
+                          width: itemWidth,
+                          child: ExportFormatButton(
+                            label: item,
+                            selected: exportFormat == item,
+                            onTap: () => setState(() => exportFormat = item),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
             const SizedBox(height: 16),
@@ -7350,34 +7810,38 @@ class _ExportBillPageState extends State<ExportBillPage> {
             ),
             const SizedBox(height: 20),
             CatPawPrimaryButton(
-              label: exportFormat == 'PDF' ? '生成账单PDF' : '生成账单图片',
+              label: exportFormat == 'PNG' ? '生成账单图片' : '导出账单文件',
               onPressed: () {
-                Navigator.push(
-                  context,
-                  appPageRoute(
-                    (_) => ExportBillPreviewPage(
-                      periodLabel: exportPeriodSubtitle(
-                        periodStart,
-                        selectedMonth,
+                final periodLabel = exportPeriodSubtitle(
+                  periodStart,
+                  selectedMonth,
+                );
+                if (exportFormat == 'PNG') {
+                  Navigator.push(
+                    context,
+                    appPageRoute(
+                      (_) => ExportBillPreviewPage(
+                        periodLabel: periodLabel,
+                        records: records,
+                        expense: expense,
+                        income: income,
+                        exportFormat: exportFormat,
+                        includeName: includeName,
+                        includeTime: includeTime,
+                        includeAmount: includeAmount,
+                        includeNote: includeNote,
                       ),
-                      records: records,
-                      expense: expense,
-                      income: income,
-                      exportFormat: exportFormat,
-                      includeName: includeName,
-                      includeTime: includeTime,
-                      includeAmount: includeAmount,
-                      includeNote: includeNote,
                     ),
-                  ),
+                  );
+                  return;
+                }
+                exportBillDataFile(
+                  context: context,
+                  records: records,
+                  periodLabel: periodLabel,
+                  format: exportFormat,
                 );
               },
-            ),
-            const SizedBox(height: 10),
-            MineTile(
-              icon: Icons.input_rounded,
-              title: '导入账单',
-              onTap: () => showToast(context, '导入账单功能待开启'),
             ),
           ],
         ),
@@ -7568,9 +8032,9 @@ class ExportFormatButton extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    label == 'PDF'
-                        ? Icons.description_rounded
-                        : Icons.image_rounded,
+                    label == 'PNG'
+                        ? Icons.image_rounded
+                        : Icons.description_rounded,
                     color: selected ? _primaryColor : _mutedColor,
                   ),
                   const SizedBox(width: 8),
@@ -10610,6 +11074,455 @@ String moneyPlain(double value) {
     return absValue.toStringAsFixed(0);
   }
   return absValue.toStringAsFixed(2);
+}
+
+List<AccountRecord> parseImportedBillRecords(String rawText) {
+  final text = rawText.trim().replaceFirst('\uFEFF', '');
+  if (text.isEmpty) {
+    throw const FormatException('文件内容为空');
+  }
+  try {
+    final decoded = jsonDecode(text);
+    final items = decoded is Map<String, dynamic>
+        ? (decoded['records'] is List<dynamic>
+              ? decoded['records'] as List<dynamic>
+              : <dynamic>[decoded])
+        : decoded is List<dynamic>
+        ? decoded
+        : const <dynamic>[];
+    final records = <AccountRecord>[];
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item is Map<String, dynamic>) {
+        records.add(importRecordFromMap(item, i));
+      } else if (item is Map) {
+        records.add(importRecordFromMap(Map<String, dynamic>.from(item), i));
+      }
+    }
+    if (records.isNotEmpty) return records;
+  } catch (_) {
+    // JSON parsing failed; try CSV/TXT below.
+  }
+  return parseImportedCsvRecords(text);
+}
+
+String importDuplicateKey(AccountRecord record) {
+  final normalizedDate = record.date.toIso8601String();
+  final normalizedAmount = record.amount.toStringAsFixed(2);
+  final normalizedCategory = normalizeCategoryName(record.category).trim();
+  final normalizedNote = record.note.trim();
+  return [
+    normalizedAmount,
+    normalizedCategory,
+    normalizedDate,
+    normalizedNote,
+  ].join('|');
+}
+
+Future<void> exportBillDataFile({
+  required BuildContext context,
+  required List<AccountRecord> records,
+  required String periodLabel,
+  required String format,
+}) async {
+  final normalizedFormat = format.toUpperCase();
+  final fileName =
+      'miao_jizhang_${safeExportFileName(periodLabel)}.${normalizedFormat.toLowerCase()}';
+  final content = buildExportBillContent(
+    records,
+    periodLabel,
+    normalizedFormat,
+  );
+  final mimeType = switch (normalizedFormat) {
+    'JSON' => 'application/json',
+    'CSV' => 'text/csv',
+    'TXT' => 'text/plain',
+    _ => 'text/plain',
+  };
+  final bytes = Uint8List.fromList(utf8.encode(content));
+
+  try {
+    if (kIsWeb) {
+      final downloaded = await downloadExportFile(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: mimeType,
+      );
+      if (context.mounted) {
+        showToast(context, downloaded ? '账单文件已下载' : '导出失败，请稍后再试');
+      }
+      return;
+    }
+
+    final box = context.findRenderObject() as RenderBox?;
+    await SharePlus.instance.share(
+      ShareParams(
+        title: '导出账单',
+        text: '喵记账 $periodLabel 账单',
+        files: [XFile.fromData(bytes, mimeType: mimeType, name: fileName)],
+        fileNameOverrides: [fileName],
+        sharePositionOrigin: box == null
+            ? null
+            : box.localToGlobal(Offset.zero) & box.size,
+        downloadFallbackEnabled: true,
+      ),
+    );
+    if (context.mounted) showToast(context, '账单文件已生成');
+  } catch (_) {
+    if (context.mounted) showToast(context, '导出失败，请稍后再试');
+  }
+}
+
+String buildExportBillContent(
+  List<AccountRecord> records,
+  String periodLabel,
+  String format,
+) {
+  final sortedRecords = [...records]..sort((a, b) => b.date.compareTo(a.date));
+  return switch (format) {
+    'JSON' => buildExportJson(sortedRecords, periodLabel),
+    'CSV' => buildExportCsv(sortedRecords),
+    'TXT' => buildExportTxt(sortedRecords),
+    _ => buildExportTxt(sortedRecords),
+  };
+}
+
+String buildExportJson(List<AccountRecord> records, String periodLabel) {
+  const encoder = JsonEncoder.withIndent('  ');
+  return encoder.convert({
+    'app': '喵记账',
+    'version': 1,
+    'periodLabel': periodLabel,
+    'exportedAt': DateTime.now().toIso8601String(),
+    'records': records.map((record) => record.toJson()).toList(),
+  });
+}
+
+String buildExportCsv(List<AccountRecord> records) {
+  final buffer = StringBuffer('\uFEFF类型,分类,金额,备注,时间\n');
+  for (final record in records) {
+    buffer.writeln(
+      [
+        record.type == RecordType.income ? '收入' : '支出',
+        record.category,
+        record.amount.toStringAsFixed(2),
+        record.note,
+        '${formatDate(record.date)} ${formatTime(record.date)}',
+      ].map(escapeCsvCell).join(','),
+    );
+  }
+  return buffer.toString();
+}
+
+String buildExportTxt(List<AccountRecord> records) {
+  final buffer = StringBuffer('类型,分类,金额,备注,时间\n');
+  for (final record in records) {
+    buffer.writeln(
+      [
+        record.type == RecordType.income ? '收入' : '支出',
+        record.category,
+        record.amount.toStringAsFixed(2),
+        record.note,
+        '${formatDate(record.date)} ${formatTime(record.date)}',
+      ].map(escapeCsvCell).join(','),
+    );
+  }
+  return buffer.toString();
+}
+
+String escapeCsvCell(String value) {
+  if (value.contains(',') || value.contains('"') || value.contains('\n')) {
+    return '"${value.replaceAll('"', '""')}"';
+  }
+  return value;
+}
+
+String safeExportFileName(String value) {
+  return value
+      .replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
+}
+
+List<AccountRecord> parseImportedCsvRecords(String text) {
+  final rows = const LineSplitter()
+      .convert(text)
+      .map(parseCsvLine)
+      .where((row) => row.any((cell) => cell.trim().isNotEmpty))
+      .toList();
+  if (rows.isEmpty) {
+    throw const FormatException('没有识别到账单记录');
+  }
+
+  final firstRow = rows.first.map((cell) => cell.trim()).toList();
+  final hasHeader = firstRow.any(isImportHeaderCell);
+  final headerIndexes = hasHeader
+      ? buildHeaderIndexes(firstRow)
+      : <String, int>{};
+  final dataRows = hasHeader ? rows.skip(1).toList() : rows;
+  final records = <AccountRecord>[];
+
+  for (var i = 0; i < dataRows.length; i++) {
+    try {
+      records.add(
+        hasHeader
+            ? importRecordFromCsvHeaderRow(dataRows[i], headerIndexes, i)
+            : importRecordFromCsvPlainRow(dataRows[i], i),
+      );
+    } catch (_) {
+      // Skip invalid rows and keep importing rows we can understand.
+    }
+  }
+  if (records.isEmpty) {
+    throw const FormatException('没有识别到账单记录');
+  }
+  return records;
+}
+
+AccountRecord importRecordFromCsvHeaderRow(
+  List<String> row,
+  Map<String, int> headerIndexes,
+  int index,
+) {
+  String? cell(String key) {
+    final position = headerIndexes[key];
+    if (position == null || position >= row.length) return null;
+    return row[position].trim();
+  }
+
+  return importRecordFromMap({
+    'type': cell('type'),
+    'category': cell('category'),
+    'amount': cell('amount'),
+    'note': cell('note'),
+    'date': cell('date') ?? cell('time'),
+  }, index);
+}
+
+AccountRecord importRecordFromCsvPlainRow(List<String> row, int index) {
+  if (row.length < 3) {
+    throw const FormatException('CSV 行字段不足');
+  }
+  return importRecordFromMap({
+    'type': row[0],
+    'category': row[1],
+    'amount': row[2],
+    'note': row.length > 3 ? row[3] : '',
+    'date': row.length > 4 ? row[4] : null,
+  }, index);
+}
+
+AccountRecord importRecordFromMap(Map<String, dynamic> data, int index) {
+  final amountRaw = readImportField(data, const [
+    'amount',
+    '金额',
+    '花费金额',
+    'money',
+    'value',
+  ]);
+  final signedAmount = parseImportAmount(amountRaw);
+  final typeRaw = readImportField(data, const ['type', '类型', '收支', '账单类型']);
+  final type = parseImportType(typeRaw, signedAmount);
+  final categoryRaw = readImportField(data, const [
+    'category',
+    '分类',
+    '账单名称',
+    'name',
+    '名称',
+  ]);
+  final categoryText = categoryRaw?.toString().trim();
+  final category = normalizeCategoryName(
+    categoryText?.isNotEmpty == true ? categoryText! : '其他',
+  );
+  final note =
+      readImportField(data, const [
+        'note',
+        '备注',
+        '账单备注',
+        '说明',
+      ])?.toString().trim() ??
+      '';
+  final date =
+      parseImportDate(
+        readImportField(data, const [
+          'date',
+          '日期',
+          'time',
+          '时间',
+          'datetime',
+          '记录时间',
+        ]),
+      ) ??
+      DateTime.now();
+
+  return AccountRecord(
+    id: 'import-${DateTime.now().microsecondsSinceEpoch}-$index',
+    type: type,
+    category: category,
+    icon: iconForCategory(type, category),
+    amount: signedAmount.abs(),
+    note: note,
+    date: date,
+  );
+}
+
+dynamic readImportField(Map<String, dynamic> data, List<String> aliases) {
+  for (final alias in aliases) {
+    if (data.containsKey(alias) && data[alias] != null) return data[alias];
+  }
+  final lowerKeys = {
+    for (final key in data.keys) key.toString().toLowerCase(): key,
+  };
+  for (final alias in aliases) {
+    final key = lowerKeys[alias.toLowerCase()];
+    if (key != null && data[key] != null) return data[key];
+  }
+  return null;
+}
+
+double parseImportAmount(dynamic value) {
+  if (value is num) return value.toDouble();
+  final text = value?.toString().trim() ?? '';
+  final cleaned = text
+      .replaceAll('¥', '')
+      .replaceAll('￥', '')
+      .replaceAll(',', '')
+      .replaceAll('元', '')
+      .replaceAll(' ', '');
+  final amount = double.tryParse(cleaned);
+  if (amount == null) {
+    throw const FormatException('金额格式不正确');
+  }
+  return amount;
+}
+
+RecordType parseImportType(dynamic value, double signedAmount) {
+  final text = value?.toString().trim().toLowerCase() ?? '';
+  if (text.contains('收入') ||
+      text.contains('income') ||
+      text == 'in' ||
+      text == '+') {
+    return RecordType.income;
+  }
+  if (text.contains('支出') ||
+      text.contains('expense') ||
+      text.contains('out') ||
+      text == '-') {
+    return RecordType.expense;
+  }
+  return signedAmount > 0 ? RecordType.income : RecordType.expense;
+}
+
+DateTime? parseImportDate(dynamic value) {
+  if (value is DateTime) return value;
+  if (value is num) {
+    final intValue = value.toInt();
+    if (intValue > 1000000000000) {
+      return DateTime.fromMillisecondsSinceEpoch(intValue);
+    }
+  }
+  final raw = value?.toString().trim();
+  if (raw == null || raw.isEmpty) return null;
+  final normalized = raw
+      .replaceAll('年', '-')
+      .replaceAll('月', '-')
+      .replaceAll('日', '')
+      .replaceAll('/', '-');
+  final parsed = DateTime.tryParse(normalized);
+  if (parsed != null) return parsed;
+  final match = RegExp(
+    r'^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?$',
+  ).firstMatch(normalized);
+  if (match == null) return null;
+  return DateTime(
+    int.parse(match.group(1)!),
+    int.parse(match.group(2)!),
+    int.parse(match.group(3)!),
+    int.parse(match.group(4) ?? '0'),
+    int.parse(match.group(5) ?? '0'),
+  );
+}
+
+List<String> parseCsvLine(String line) {
+  final cells = <String>[];
+  final buffer = StringBuffer();
+  var inQuotes = false;
+  for (var i = 0; i < line.length; i++) {
+    final char = line[i];
+    if (char == '"') {
+      if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+        buffer.write('"');
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char == ',' && !inQuotes) {
+      cells.add(buffer.toString());
+      buffer.clear();
+    } else {
+      buffer.write(char);
+    }
+  }
+  cells.add(buffer.toString());
+  return cells;
+}
+
+bool isImportHeaderCell(String cell) {
+  final normalized = cell.trim().toLowerCase();
+  return const {
+    'type',
+    '类型',
+    '收支',
+    '账单类型',
+    'category',
+    '分类',
+    '账单名称',
+    'amount',
+    '金额',
+    '花费金额',
+    'note',
+    '备注',
+    '账单备注',
+    'date',
+    '日期',
+    'time',
+    '时间',
+    'datetime',
+    '记录时间',
+  }.contains(normalized);
+}
+
+Map<String, int> buildHeaderIndexes(List<String> headers) {
+  final indexes = <String, int>{};
+  for (var i = 0; i < headers.length; i++) {
+    final header = headers[i].trim().toLowerCase();
+    if (const {'type', '类型', '收支', '账单类型'}.contains(header)) {
+      indexes['type'] = i;
+    } else if (const {
+      'category',
+      '分类',
+      '账单名称',
+      'name',
+      '名称',
+    }.contains(header)) {
+      indexes['category'] = i;
+    } else if (const {
+      'amount',
+      '金额',
+      '花费金额',
+      'money',
+      'value',
+    }.contains(header)) {
+      indexes['amount'] = i;
+    } else if (const {'note', '备注', '账单备注', '说明'}.contains(header)) {
+      indexes['note'] = i;
+    } else if (const {'date', '日期', 'datetime', '记录时间'}.contains(header)) {
+      indexes['date'] = i;
+    } else if (const {'time', '时间'}.contains(header)) {
+      indexes['time'] = i;
+    }
+  }
+  return indexes;
 }
 
 String moneyCompact(double value) {
