@@ -11155,17 +11155,12 @@ Future<void> exportBillDataFile({
     }
 
     final box = context.findRenderObject() as RenderBox?;
-    await SharePlus.instance.share(
-      ShareParams(
-        title: '导出账单',
-        text: '喵记账 $periodLabel 账单',
-        files: [XFile.fromData(bytes, mimeType: mimeType, name: fileName)],
-        fileNameOverrides: [fileName],
-        sharePositionOrigin: box == null
-            ? null
-            : box.localToGlobal(Offset.zero) & box.size,
-        downloadFallbackEnabled: true,
-      ),
+    await Share.share(
+      '喵记账 $periodLabel 账单',
+      subject: '导出账单',
+      sharePositionOrigin: box == null
+          ? null
+          : box.localToGlobal(Offset.zero) & box.size,
     );
     if (context.mounted) showToast(context, '账单文件已生成');
   } catch (_) {

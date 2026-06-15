@@ -41,10 +41,10 @@ dependencies:
   timezone: ^0.11.0
   flutter_timezone: ^5.0.2
   image_picker: ^1.2.2
-  package_info_plus: ^10.1.0
+  package_info_plus: ^9.0.1
   gal: ^2.3.2
-  file_picker: ^3.0.4
-  share_plus: ^13.1.0
+  file_picker: ^10.3.10
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_test:
